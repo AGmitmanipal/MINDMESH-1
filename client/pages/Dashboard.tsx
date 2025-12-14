@@ -208,20 +208,13 @@ export default function Dashboard() {
             </div>
 
             {/* Help */}
-            <div className="mt-auto p-6 space-y-2">
+            <div className="mt-auto p-6">
               {pageCount === 0 && (
-                <button
-                  onClick={handleAddSampleData}
-                  disabled={isLoading}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <Loader className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4" />
-                  )}
-                  Add Sample Data
-                </button>
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg mb-4 border border-blue-200 dark:border-blue-800">
+                  <p className="text-xs text-blue-700 dark:text-blue-200">
+                    💡 <strong>Tip:</strong> Install the Cortex extension to start capturing your browsing.
+                  </p>
+                </div>
               )}
               <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-sm font-medium">
                 <HelpCircle className="w-4 h-4" />
