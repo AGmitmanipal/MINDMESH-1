@@ -1,16 +1,31 @@
 /**
  * Cortex Background Service Worker
  * 
- * Handles messages from content scripts and web dashboard.
- * Manages IndexedDB operations and coordinates with web workers.
+ * Production-ready service worker that coordinates all Cortex services:
+ * - Memory capture and storage
+ * - Embedding generation
+ * - Semantic search
+ * - Proactive suggestions
+ * - Action execution
  */
 
-import type { ExtensionMessage, PageContext, MemoryNode } from "@shared/extension-types";
-import { generateMemoryId } from "@client/lib/text-utils";
+import type { ExtensionMessage, PageContext, MemoryNode, Embedding } from "@shared/extension-types";
+import { generateMemoryId, extractKeywords } from "@client/lib/text-utils";
+import { cortexStorage } from "../utils/storage";
+import { semanticGraphBuilder } from "../utils/semantic-graph";
+import { recallService } from "../services/recall-service";
+import { proactivityEngine } from "../services/proactivity-engine";
+import { sessionService } from "../services/session-service";
+import { actionExecutor } from "../services/action-executor";
 
 interface MessageHandler {
   [key: string]: (message: ExtensionMessage) => Promise<unknown>;
 }
+
+// Initialize storage
+cortexStorage.ready().catch((err) => {
+  console.error("Cortex: Failed to initialize storage", err);
+});
 
 /**
  * Initialize message handler
@@ -33,27 +48,39 @@ function initializeMessageHandler() {
         return { success: false, reason: "Page excluded by privacy rules" };
       }
 
+      // Get or create session ID
+      const sessionId = sessionService.getCurrentSessionId();
+
+      // Extract keywords
+      const keywords = extractKeywords(
+        pageContext.readableText,
+        pageContext.title,
+        10
+      );
+
       // Create memory node
       const memoryNode: MemoryNode = {
         id: generateMemoryId(pageContext.url, pageContext.timestamp),
         url: pageContext.url,
         title: pageContext.title,
-        readableText: pageContext.readableText,
+        readableText: pageContext.readableText.slice(0, 10000), // Limit text size
         timestamp: pageContext.timestamp,
-        keywords: [],
+        keywords,
         metadata: {
-          domain: pageContext.url.split("/")[2] || "",
+          domain: getDomainFromUrl(pageContext.url),
           favicon: pageContext.favicon,
           tabId: pageContext.tabId,
-          sessionId: pageContext.sessionId,
+          sessionId,
         },
       };
 
       // Store in IndexedDB
-      await storeMemoryNode(memoryNode);
+      await cortexStorage.addMemoryNode(memoryNode);
 
-      // Trigger embedding generation in web worker
-      generateEmbedding(memoryNode);
+      // Generate embedding asynchronously
+      generateEmbeddingAsync(memoryNode).catch((err) => {
+        console.error("Cortex: Failed to generate embedding", err);
+      });
 
       return { success: true, memoryId: memoryNode.id };
     },
@@ -62,16 +89,16 @@ function initializeMessageHandler() {
       if (message.type !== "SEARCH_MEMORY") return;
 
       const { query, limit = 10 } = message.payload;
-      const results = await searchMemory(query, limit);
+      const result = await recallService.search(query, limit);
 
-      return { success: true, results };
+      return { success: true, ...result };
     },
 
     async GET_SUGGESTIONS(message: ExtensionMessage) {
       if (message.type !== "GET_SUGGESTIONS") return;
 
       const { currentUrl, limit = 5 } = message.payload;
-      const suggestions = await getSuggestions(currentUrl, limit);
+      const suggestions = await proactivityEngine.generateSuggestions(currentUrl, limit);
 
       return { success: true, suggestions };
     },
@@ -79,14 +106,20 @@ function initializeMessageHandler() {
     async FORGET_DATA(message: ExtensionMessage) {
       if (message.type !== "FORGET_DATA") return;
 
-      const { ruleId } = message.payload;
-      const deleted = await applyForgetRule(ruleId);
+      const { ruleId, domain, startDate, endDate } = message.payload as any;
+      let deleted = 0;
+
+      if (domain) {
+        deleted = await cortexStorage.deleteByDomain(domain);
+      } else if (startDate && endDate) {
+        deleted = await cortexStorage.deleteByDateRange(startDate, endDate);
+      }
 
       return { success: true, deleted };
     },
 
     async EXPORT_MEMORY() {
-      const allMemory = await getAllMemory();
+      const allMemory = await cortexStorage.getAllMemoryNodes();
       return {
         success: true,
         data: allMemory,
@@ -108,6 +141,25 @@ function initializeMessageHandler() {
       });
 
       return { success: true };
+    },
+
+    async GET_ACTIVITY_INSIGHTS() {
+      const { activityInsightsService } = await import("../services/activity-insights");
+      const insights = await activityInsightsService.generateInsights(7);
+      return { success: true, insights };
+    },
+
+    async GET_SHORTCUTS() {
+      const { shortcutGenerator } = await import("../services/shortcut-generator");
+      const shortcuts = await shortcutGenerator.generateShortcuts(10);
+      return { success: true, shortcuts };
+    },
+
+    async EXECUTE_ACTION(message: ExtensionMessage) {
+      if (message.type !== "EXECUTE_ACTION") return;
+      const action = (message.payload as any).action;
+      const result = await actionExecutor.execute(action);
+      return { success: result.success, ...result };
     },
   };
 
@@ -135,8 +187,10 @@ async function isPageExcluded(pageContext: PageContext): Promise<boolean> {
   const settings = await chrome.storage.local.get("captureSettings");
   const captureSettings = settings.captureSettings || {};
 
+  const domain = getDomainFromUrl(pageContext.url);
+
   // Check excluded domains
-  if (captureSettings.excludeDomains?.includes(pageContext.url.split("/")[2])) {
+  if (captureSettings.excludeDomains?.includes(domain)) {
     return true;
   }
 
@@ -155,62 +209,96 @@ async function isPageExcluded(pageContext: PageContext): Promise<boolean> {
 }
 
 /**
- * Store memory node in IndexedDB
+ * Generate embedding asynchronously using web worker
  */
-async function storeMemoryNode(node: MemoryNode): Promise<string> {
-  // This would interact with IndexedDB via a dedicated storage module
-  // For now, using chrome.storage as fallback
-  const key = `memory:${node.id}`;
-  await chrome.storage.local.set({ [key]: node });
-  return node.id;
+async function generateEmbeddingAsync(node: MemoryNode): Promise<void> {
+  try {
+    // Create embedding worker
+    const worker = new Worker(
+      chrome.runtime.getURL("dist/extension/web-workers/embedding.worker.js"),
+      { type: "module" }
+    );
+
+    // Send embedding request
+    const embeddingPromise = new Promise<number[]>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        reject(new Error("Embedding generation timeout"));
+      }, 30000); // 30 second timeout
+
+      worker.onmessage = (event) => {
+        clearTimeout(timeout);
+        worker.terminate();
+
+        if (event.data.success) {
+          resolve(event.data.embedding);
+        } else {
+          reject(new Error("Embedding generation failed"));
+        }
+      };
+
+      worker.onerror = (error) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        reject(error);
+      };
+    });
+
+    worker.postMessage({
+      id: node.id,
+      text: node.readableText.slice(0, 5000), // Limit for performance
+      title: node.title,
+      keywords: node.keywords,
+    });
+
+    const embeddingVector = await embeddingPromise;
+
+    // Store embedding
+    const embedding: Embedding = {
+      vector: embeddingVector,
+      model: "fallback", // Will be "wasm" when WASM model is loaded
+      timestamp: Date.now(),
+    };
+
+    await cortexStorage.storeEmbedding(node.id, embedding);
+
+    // Update semantic graph
+    await semanticGraphBuilder.addNode(node, embedding).catch((err) => {
+      console.error("Cortex: Failed to update semantic graph", err);
+    });
+  } catch (error) {
+    console.error("Cortex: Embedding generation error", error);
+    // Continue without embedding - page is still stored
+  }
 }
 
 /**
- * Generate embedding for memory node
+ * Extract domain from URL
  */
-async function generateEmbedding(node: MemoryNode) {
-  // In production, this would spawn a Web Worker
-  // that uses WASM embedding model (onnxruntime-web or ggml-wasm)
-  console.log("Cortex: Would generate embedding for", node.id);
-}
-
-/**
- * Search memory
- */
-async function searchMemory(query: string, limit: number): Promise<MemoryNode[]> {
-  // This would query IndexedDB with vector similarity
-  console.log("Cortex: Searching memory for", query);
-  return [];
-}
-
-/**
- * Get suggestions for current page
- */
-async function getSuggestions(currentUrl: string, limit: number): Promise<MemoryNode[]> {
-  // This would find related pages based on semantic similarity
-  console.log("Cortex: Getting suggestions for", currentUrl);
-  return [];
-}
-
-/**
- * Apply forget rule
- */
-async function applyForgetRule(ruleId: string): Promise<number> {
-  // This would apply a privacy rule to delete matching data
-  console.log("Cortex: Applying forget rule", ruleId);
-  return 0;
-}
-
-/**
- * Get all memory
- */
-async function getAllMemory(): Promise<MemoryNode[]> {
-  // This would retrieve all stored memory nodes
-  console.log("Cortex: Exporting all memory");
-  return [];
+function getDomainFromUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname;
+  } catch {
+    return url.split("/")[2] || "";
+  }
 }
 
 // Initialize on extension load
 initializeMessageHandler();
+
+// Initialize default settings if not present
+chrome.storage.local.get("captureSettings").then((result) => {
+  if (!result.captureSettings) {
+    chrome.storage.local.set({
+      captureSettings: {
+        enabled: true,
+        excludeDomains: [],
+        excludeKeywords: [],
+        maxStorageSize: 50 * 1024 * 1024, // 50 MB
+      },
+    });
+  }
+});
 
 console.log("Cortex: Service worker initialized");

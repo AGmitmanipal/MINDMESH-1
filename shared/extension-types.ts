@@ -15,7 +15,7 @@ export interface PageContext {
 
 export interface Embedding {
   vector: number[];
-  model: "onnx-sentence" | "ggml";
+  model: "onnx-sentence" | "ggml" | "wasm" | "fallback";
   timestamp: number;
 }
 
@@ -94,7 +94,10 @@ export type ExtensionMessage =
   | {
       type: "FORGET_DATA";
       payload: {
-        ruleId: string;
+        ruleId?: string;
+        domain?: string;
+        startDate?: number;
+        endDate?: number;
       };
     }
   | {
@@ -104,4 +107,21 @@ export type ExtensionMessage =
   | {
       type: "UPDATE_CAPTURE_SETTINGS";
       payload: Partial<CaptureSettings>;
+    }
+  | {
+      type: "GET_ACTIVITY_INSIGHTS";
+      payload: Record<string, never>;
+    }
+  | {
+      type: "GET_SHORTCUTS";
+      payload: Record<string, never>;
+    }
+  | {
+      type: "EXECUTE_ACTION";
+      payload: {
+        action: {
+          type: "open_tab" | "close_tab" | "navigate" | "fill_form" | "click" | "extract";
+          data: Record<string, unknown>;
+        };
+      };
     };
