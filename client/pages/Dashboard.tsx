@@ -1,6 +1,9 @@
-import { useState } from "react";
-import { Search, Sidebar, Settings, HelpCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Search, Sidebar, Settings, HelpCircle, Plus, Loader } from "lucide-react";
 import Header from "@/components/Header";
+import { useMemoryStorage } from "@/hooks/useMemoryStorage";
+import type { MemoryNode } from "@shared/extension-types";
+import { generateSampleMemoryNodes } from "@/lib/sample-data";
 
 interface PageMemory {
   id: string;
@@ -25,67 +28,166 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("search");
   const [selectedMemory, setSelectedMemory] = useState<PageMemory | null>(null);
+  const [memories, setMemories] = useState<PageMemory[]>([]);
+  const [pageCount, setPageCount] = useState(0);
+  const [storageSize, setStorageSize] = useState(0);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock data - in production this would come from IndexedDB
-  const mockMemories: PageMemory[] = [
-    {
-      id: "1",
-      url: "https://react.dev/learn",
-      title: "React Documentation - Learning",
-      snippet:
-        "React is a library for building user interfaces with reusable components...",
-      timestamp: "2024-01-15 10:30 AM",
-      similarity: 0.95,
-      keywords: ["React", "components", "hooks", "JSX"],
-    },
-    {
-      id: "2",
-      url: "https://nextjs.org/docs",
-      title: "Next.js Documentation",
-      snippet:
-        "Next.js is a React framework for production with built-in optimization...",
-      timestamp: "2024-01-15 9:15 AM",
-      similarity: 0.87,
-      keywords: ["Next.js", "framework", "SSR", "optimization"],
-    },
-    {
-      id: "3",
-      url: "https://tailwindcss.com",
-      title: "Tailwind CSS - Rapidly Build Modern Designs",
-      snippet:
-        "Utility-first CSS framework for building custom designs without leaving HTML...",
-      timestamp: "2024-01-14 2:45 PM",
-      similarity: 0.76,
-      keywords: ["Tailwind", "CSS", "utility-first", "design"],
-    },
-  ];
+  const {
+    isReady,
+    addPage,
+    getAllPages,
+    getPageCount,
+    getStorageSize,
+    searchPages,
+    error,
+  } = useMemoryStorage();
 
-  const mockClusters: Cluster[] = [
-    {
-      id: "c1",
-      name: "Frontend Development",
-      color: "from-blue-500 to-blue-600",
-      itemCount: 12,
-      pages: mockMemories.slice(0, 2),
-    },
-    {
-      id: "c2",
-      name: "Design & Styling",
-      color: "from-purple-500 to-purple-600",
-      itemCount: 8,
-      pages: [mockMemories[2]],
-    },
-  ];
+  // Load data from IndexedDB
+  useEffect(() => {
+    if (!isReady) return;
+
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const allPages = await getAllPages();
+        const count = await getPageCount();
+        const size = await getStorageSize();
+
+        setPageCount(count);
+        setStorageSize(size);
+
+        // Convert MemoryNode to PageMemory format
+        const formattedMemories: PageMemory[] = allPages.map((node) => ({
+          id: node.id,
+          url: node.url,
+          title: node.title,
+          snippet: node.readableText.slice(0, 150),
+          timestamp: new Date(node.timestamp).toLocaleString(),
+          similarity: 1.0 - (Math.random() * 0.2), // Simulate similarity scores
+          keywords: node.keywords,
+        }));
+
+        setMemories(formattedMemories);
+
+        // Generate simple clusters based on keywords
+        const clusterMap = new Map<string, PageMemory[]>();
+        formattedMemories.forEach((memory) => {
+          const primaryKeyword = memory.keywords[0] || "Other";
+          if (!clusterMap.has(primaryKeyword)) {
+            clusterMap.set(primaryKeyword, []);
+          }
+          clusterMap.get(primaryKeyword)!.push(memory);
+        });
+
+        const generatedClusters: Cluster[] = Array.from(clusterMap.entries())
+          .slice(0, 6)
+          .map(([keyword, pages], index) => ({
+            id: `c${index}`,
+            name: `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} Resources`,
+            color: [
+              "from-blue-500 to-blue-600",
+              "from-purple-500 to-purple-600",
+              "from-pink-500 to-pink-600",
+              "from-green-500 to-green-600",
+              "from-orange-500 to-orange-600",
+              "from-teal-500 to-teal-600",
+            ][index % 6],
+            itemCount: pages.length,
+            pages: pages.slice(0, 3),
+          }));
+
+        setClusters(generatedClusters);
+      } catch (err) {
+        console.error("Failed to load memories:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [isReady, getAllPages, getPageCount, getStorageSize]);
+
+  // Add sample data for testing
+  const handleAddSampleData = async () => {
+    try {
+      setIsLoading(true);
+      const sampleNodes = generateSampleMemoryNodes();
+      for (const node of sampleNodes) {
+        await addPage(node);
+      }
+      // Reload data
+      const allPages = await getAllPages();
+      const count = await getPageCount();
+      const size = await getStorageSize();
+
+      setPageCount(count);
+      setStorageSize(size);
+
+      const formattedMemories: PageMemory[] = allPages.map((node) => ({
+        id: node.id,
+        url: node.url,
+        title: node.title,
+        snippet: node.readableText.slice(0, 150),
+        timestamp: new Date(node.timestamp).toLocaleString(),
+        similarity: 1.0 - (Math.random() * 0.2),
+        keywords: node.keywords,
+      }));
+
+      setMemories(formattedMemories);
+
+      const clusterMap = new Map<string, PageMemory[]>();
+      formattedMemories.forEach((memory) => {
+        const primaryKeyword = memory.keywords[0] || "Other";
+        if (!clusterMap.has(primaryKeyword)) {
+          clusterMap.set(primaryKeyword, []);
+        }
+        clusterMap.get(primaryKeyword)!.push(memory);
+      });
+
+      const generatedClusters: Cluster[] = Array.from(clusterMap.entries())
+        .slice(0, 6)
+        .map(([keyword, pages], index) => ({
+          id: `c${index}`,
+          name: `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} Resources`,
+          color: [
+            "from-blue-500 to-blue-600",
+            "from-purple-500 to-purple-600",
+            "from-pink-500 to-pink-600",
+            "from-green-500 to-green-600",
+            "from-orange-500 to-orange-600",
+            "from-teal-500 to-teal-600",
+          ][index % 6],
+          itemCount: pages.length,
+          pages: pages.slice(0, 3),
+        }));
+
+      setClusters(generatedClusters);
+    } catch (err) {
+      console.error("Failed to add sample data:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const filteredMemories = searchQuery
-    ? mockMemories.filter(
+    ? memories.filter(
         (m) =>
           m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
           m.keywords.some((k) =>
             k.toLowerCase().includes(searchQuery.toLowerCase())
           )
       )
-    : mockMemories;
+    : memories;
+
+  const formatStorageSize = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 10) / 10 + " " + sizes[i];
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -140,24 +242,42 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground mb-1">
                   MEMORY SIZE
                 </p>
-                <p className="text-2xl font-bold text-primary">2.4 MB</p>
+                <p className="text-2xl font-bold text-primary">
+                  {formatStorageSize(storageSize)}
+                </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">
                   PAGES INDEXED
                 </p>
-                <p className="text-2xl font-bold text-primary">247</p>
+                <p className="text-2xl font-bold text-primary">{pageCount}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">
                   ACTIVE CLUSTERS
                 </p>
-                <p className="text-2xl font-bold text-primary">12</p>
+                <p className="text-2xl font-bold text-primary">
+                  {clusters.length}
+                </p>
               </div>
             </div>
 
             {/* Help */}
-            <div className="mt-auto p-6">
+            <div className="mt-auto p-6 space-y-2">
+              {pageCount === 0 && (
+                <button
+                  onClick={handleAddSampleData}
+                  disabled={isLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-colors text-sm font-medium disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Plus className="w-4 h-4" />
+                  )}
+                  Add Sample Data
+                </button>
+              )}
               <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-sm font-medium">
                 <HelpCircle className="w-4 h-4" />
                 Help & Feedback
@@ -169,7 +289,11 @@ export default function Dashboard() {
         {/* Main Content */}
         <main className="flex-1 overflow-auto">
           <div className="max-w-6xl mx-auto p-6 lg:p-8">
-            {activeTab === "search" && (
+            {isLoading ? (
+              <div className="flex items-center justify-center h-96">
+                <Loader className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : activeTab === "search" ? (
               <div>
                 <h1 className="text-3xl lg:text-4xl font-bold mb-2">
                   Semantic Memory Search
@@ -244,15 +368,15 @@ export default function Dashboard() {
 
                 {filteredMemories.length === 0 && (
                   <div className="text-center py-12">
-                    <p className="text-muted-foreground">
-                      No results found. Try a different search.
+                    <p className="text-muted-foreground mb-4">
+                      {memories.length === 0
+                        ? "No pages indexed yet. Click 'Add Sample Data' in the sidebar to get started!"
+                        : "No results found. Try a different search."}
                     </p>
                   </div>
                 )}
               </div>
-            )}
-
-            {activeTab === "clusters" && (
+            ) : activeTab === "clusters" ? (
               <div>
                 <h1 className="text-3xl lg:text-4xl font-bold mb-2">
                   Tab Clustering
@@ -262,43 +386,49 @@ export default function Dashboard() {
                   eliminates tab chaos.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {mockClusters.map((cluster) => (
-                    <div
-                      key={cluster.id}
-                      className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow bg-white dark:bg-slate-900/50"
-                    >
+                {clusters.length === 0 ? (
+                  <div className="text-center py-12">
+                    <p className="text-muted-foreground">
+                      No clusters yet. Add some pages to get started!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {clusters.map((cluster) => (
                       <div
-                        className={`h-32 bg-gradient-to-br ${cluster.color}`}
-                      />
-                      <div className="p-6">
-                        <h3 className="text-xl font-bold mb-2">
-                          {cluster.name}
-                        </h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          {cluster.itemCount} related pages
-                        </p>
-                        <div className="space-y-2">
-                          {cluster.pages.map((page) => (
-                            <a
-                              key={page.id}
-                              href={page.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block text-sm text-primary hover:underline truncate"
-                            >
-                              {page.title}
-                            </a>
-                          ))}
+                        key={cluster.id}
+                        className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow bg-white dark:bg-slate-900/50"
+                      >
+                        <div
+                          className={`h-32 bg-gradient-to-br ${cluster.color}`}
+                        />
+                        <div className="p-6">
+                          <h3 className="text-xl font-bold mb-2">
+                            {cluster.name}
+                          </h3>
+                          <p className="text-sm text-muted-foreground mb-4">
+                            {cluster.itemCount} related pages
+                          </p>
+                          <div className="space-y-2">
+                            {cluster.pages.map((page) => (
+                              <a
+                                key={page.id}
+                                href={page.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block text-sm text-primary hover:underline truncate"
+                              >
+                                {page.title}
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-
-            {activeTab === "settings" && (
+            ) : (
               <div>
                 <h1 className="text-3xl lg:text-4xl font-bold mb-2">
                   Privacy Settings
@@ -356,10 +486,17 @@ export default function Dashboard() {
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Used:</span>
-                        <span className="font-semibold">2.4 MB / 50 MB</span>
+                        <span className="font-semibold">
+                          {formatStorageSize(storageSize)} / 50 MB
+                        </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                        <div className="bg-primary h-full w-[4.8%]" />
+                        <div
+                          className="bg-primary h-full"
+                          style={{
+                            width: `${Math.min((storageSize / (50 * 1024 * 1024)) * 100, 100)}%`,
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -427,7 +564,7 @@ export default function Dashboard() {
                 </p>
                 <p className="text-sm">
                   This page was matched due to semantic similarity in content
-                  about web development concepts and shared keywords.
+                  and shared keywords.
                 </p>
               </div>
             </div>
