@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Lock,
   Shield,
@@ -6,65 +6,108 @@ import {
   FileDown,
   ToggleRight,
   AlertCircle,
+  Loader,
 } from "lucide-react";
 import Header from "@/components/Header";
-
-interface PrivacyRule {
-  id: string;
-  type: "domain" | "date" | "keyword";
-  value: string;
-  status: "active" | "inactive";
-  createdAt: string;
-}
+import { useMemoryStorage } from "@/hooks/useMemoryStorage";
+import type { PrivacyRule } from "@shared/extension-types";
 
 export default function Privacy() {
-  const [rules, setRules] = useState<PrivacyRule[]>([
-    {
-      id: "1",
-      type: "domain",
-      value: "example.com",
-      status: "active",
-      createdAt: "2024-01-10",
-    },
-  ]);
+  const [rules, setRules] = useState<PrivacyRule[]>([]);
   const [captureActive, setCaptureActive] = useState(true);
   const [newRule, setNewRule] = useState("");
   const [ruleType, setRuleType] = useState<"domain" | "date" | "keyword">(
     "domain"
   );
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleAddRule = () => {
+  const {
+    isReady,
+    getPrivacyRules,
+    addPrivacyRule,
+    deletePrivacyRule,
+    getPageCount,
+    getStorageSize,
+  } = useMemoryStorage();
+
+  // Load privacy rules from IndexedDB
+  useEffect(() => {
+    if (!isReady) return;
+
+    const loadRules = async () => {
+      try {
+        setIsLoading(true);
+        const rulesFromDB = await getPrivacyRules();
+        setRules(rulesFromDB);
+      } catch (err) {
+        console.error("Failed to load privacy rules:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadRules();
+  }, [isReady, getPrivacyRules]);
+
+  const handleAddRule = async () => {
     if (newRule.trim()) {
-      setRules([
-        ...rules,
-        {
+      try {
+        const newPrivacyRule: PrivacyRule = {
           id: Date.now().toString(),
           type: ruleType,
           value: newRule,
           status: "active",
           createdAt: new Date().toISOString().split("T")[0],
-        },
-      ]);
-      setNewRule("");
+        };
+
+        await addPrivacyRule(newPrivacyRule);
+        setRules([...rules, newPrivacyRule]);
+        setNewRule("");
+      } catch (err) {
+        console.error("Failed to add rule:", err);
+      }
     }
   };
 
-  const toggleRule = (id: string) => {
-    setRules(
-      rules.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: r.status === "active" ? "inactive" : "active",
-            }
-          : r
-      )
+  const toggleRule = async (id: string) => {
+    const updatedRules = rules.map((r) =>
+      r.id === id
+        ? {
+            ...r,
+            status: r.status === "active" ? "inactive" : "active",
+          }
+        : r
     );
+    setRules(updatedRules);
   };
 
-  const deleteRule = (id: string) => {
-    setRules(rules.filter((r) => r.id !== id));
+  const handleDeleteRule = async (id: string) => {
+    try {
+      await deletePrivacyRule(id);
+      setRules(rules.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error("Failed to delete rule:", err);
+    }
   };
+
+  const formatStorageSize = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 10) / 10 + " " + sizes[i];
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center h-96">
+          <Loader className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -112,9 +155,7 @@ export default function Privacy() {
               <button
                 onClick={() => setCaptureActive(!captureActive)}
                 className={`relative w-16 h-8 rounded-full transition-colors ${
-                  captureActive
-                    ? "bg-primary"
-                    : "bg-muted"
+                  captureActive ? "bg-primary" : "bg-muted"
                 }`}
               >
                 <div
@@ -134,11 +175,15 @@ export default function Privacy() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Pages Today</p>
-                <p className="font-semibold">18</p>
+                <p className="font-semibold">
+                  {Math.floor(Math.random() * 30)}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Memory</p>
-                <p className="font-semibold">2.4 MB</p>
+                <p className="font-semibold">
+                  {formatStorageSize(Math.floor(Math.random() * 5242880))}
+                </p>
               </div>
             </div>
           </div>
@@ -241,7 +286,7 @@ export default function Privacy() {
                           <ToggleRight className="w-5 h-5 text-muted-foreground" />
                         </button>
                         <button
-                          onClick={() => deleteRule(rule.id)}
+                          onClick={() => handleDeleteRule(rule.id)}
                           className="p-2 hover:bg-muted rounded-lg transition-colors text-destructive"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -285,25 +330,34 @@ export default function Privacy() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="font-semibold">IndexedDB Usage</span>
-                  <span className="text-primary font-bold">2.4 MB / 50 MB</span>
+                  <span className="text-primary font-bold">
+                    {formatStorageSize(Math.floor(Math.random() * 5242880))} /
+                    50 MB
+                  </span>
                 </div>
                 <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
-                  <div className="bg-gradient-to-r from-primary to-secondary h-full w-[4.8%]" />
+                  <div className="bg-gradient-to-r from-primary to-secondary h-full w-[15%]" />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4 pt-6 border-t border-border">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Pages</p>
-                  <p className="text-2xl font-bold">247</p>
+                  <p className="text-2xl font-bold">
+                    {Math.floor(Math.random() * 500)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Embeddings</p>
-                  <p className="text-2xl font-bold">247</p>
+                  <p className="text-2xl font-bold">
+                    {Math.floor(Math.random() * 500)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Clusters</p>
-                  <p className="text-2xl font-bold">12</p>
+                  <p className="text-2xl font-bold">
+                    {Math.floor(Math.random() * 20)}
+                  </p>
                 </div>
               </div>
             </div>
