@@ -1,182 +1,63 @@
-# Cortex - Your Private AI Mind
+# Cortex - Your Personal Web Helper 🚀
 
-**Winner-ready hackathon project for Samsung Prism WebAgent Hackathon**
+**A smart browser assistant that remembers so you don't have to.**  
+*Built for the Samsung Prism WebAgent Hackathon.*
 
-Cortex is a production-ready, privacy-first AI browser assistant that captures your browsing context, creates semantic embeddings with a WASM engine, stores vectors and session graphs in IndexedDB, and exposes powerful services for recall, proactivity, analytics, and actions through a beautiful React UI. **All processing stays 100% local and permissioned by the user.**
+Cortex is a privacy-first browser extension and dashboard that automatically organizes your digital life. It understands the **meaning** of the pages you visit, allowing you to find anything in your history by just asking in plain English.
 
-## 🏆 Key Features
+---
 
-### Core Architecture
-- **On-Device Processing**: All AI runs locally via WASM - zero cloud dependencies
-- **Semantic Memory**: Vector embeddings for meaning-based search, not just keywords
-- **Graph Intelligence**: Semantic graph connects related pages automatically
-- **Real-Time Capture**: Minimal-overhead page capture with privacy controls
+## 🌟 How it works
 
-### Services
-1. **Recall Service**: Semantic search across your entire browsing history
-2. **Proactivity Engine**: Anticipates needs and suggests related content
-3. **Session Diff & Merge**: Compare and combine browsing sessions
-4. **Shortcut Generator**: Auto-generates keyboard shortcuts from patterns
-5. **Activity Insights**: Analytics on browsing patterns and productivity
-6. **Action Executor**: Browser automation and form filling
+As soon as you enable the extension, Cortex goes to work in the background:
 
-### Privacy & Control
-- **Privacy Dashboard**: Granular controls for data capture and deletion
-- **Selective Forget**: Delete by domain, date range, or keywords
-- **Data Export**: Full JSON export of your memory graph
-- **Zero Cloud**: Everything stays on your device
+1.  **Automatic Saving**: Every time you visit a page and stay for more than a second, Cortex securely saves a "memory" of that page (title, description, and key topics).
+2.  **Smart Organizing**: It automatically groups related pages into "Auto Groups" (e.g., all your "Travel" research or "Coding" tips are grouped together).
+3.  **Meaningful Search**: Instead of searching for exact words, you can search for concepts. Asking *"Where was that cheap hotel in Tokyo?"* works even if those exact words aren't in the page title.
+4.  **100% Private**: All of this happens **locally on your computer**. No data is ever sent to a server.
 
-## 🚀 Tech Stack
+---
 
-- **Frontend**: React 18 + TypeScript + Vite + TailwindCSS 3
-- **Extension**: Chrome Extension Manifest V3
-- **Storage**: IndexedDB with optimized schema
-- **AI**: WASM embedding engine (with high-quality fallback)
-- **Vector Search**: Cosine similarity with ANN indexing
-- **UI Components**: Radix UI + Lucide React icons
+## 🛠️ How do I know it's working?
 
-## 📁 Project Structure
+It's easy to verify Cortex is active:
 
-```
-MindMesh/
-├── client/              # React SPA dashboard
-│   ├── pages/           # Dashboard, Privacy, Index
-│   ├── components/      # UI components
-│   ├── hooks/           # React hooks (useMemoryStorage, useExtension)
-│   └── lib/             # Utilities
-├── extension/           # Browser extension
-│   ├── src/
-│   │   ├── background/  # Service worker
-│   │   ├── content-scripts/  # Page capture
-│   │   ├── web-workers/ # Embedding & clustering workers
-│   │   ├── services/    # Core services (Recall, Proactivity, etc.)
-│   │   └── utils/       # Storage, vector search, semantic graph
-│   └── manifest.json
-├── shared/              # Shared types between client & extension
-└── server/              # Express API (minimal, for future features)
-```
+1.  **The Extension Popup**: Click the Cortex icon in your browser bar. You'll see a live count of **"Saved Pages"** and **"Memory Size"**. If these numbers go up as you browse, it's working!
+2.  **The Dashboard**: Click **"Open Dashboard"** from the popup. You'll see your recently visited pages appear instantly.
+3.  **Try a Search**: Visit a few pages about a specific topic (e.g., "Healthy Recipes"). Then go to the dashboard and search for *"something to cook"*. Cortex will show you those recipes.
 
-## 🛠️ Development
+---
 
-### Prerequisites
-- Node.js 18+
-- pnpm (recommended) or npm
+## 🚀 Getting Started
 
-### Setup
+### 1. Install Dependencies
 ```bash
-# Install dependencies
 pnpm install
-
-# Start development server (client + server)
-pnpm dev
-
-# Build extension
-pnpm build:extension
-
-# Build everything
-pnpm build
 ```
 
-### Extension Development
-1. Build the extension: `pnpm build:extension`
-2. Load unpacked extension from `dist/extension/` in Chrome
-3. Open `http://localhost:8080/dashboard` to see the React UI
+### 2. Start the Dashboard
+```bash
+pnpm dev
+```
 
-## 🎯 Architecture Highlights
+### 3. Build the Extension
+```bash
+pnpm build:extension
+```
 
-### Storage Layer (`extension/src/utils/storage.ts`)
-- Production-ready IndexedDB with proper schema migrations
-- Optimized indexes for fast queries
-- Vector storage for embeddings
-- Graph edge storage for semantic relationships
+### 4. Load in Browser
+1.  Open Chrome/Brave and go to `chrome://extensions/`.
+2.  Turn on **Developer mode** (top right).
+3.  Click **Load unpacked** and select the `dist/extension/` folder in this project.
 
-### Vector Search (`extension/src/utils/vector-search.ts`)
-- Cosine similarity calculation
-- Brute-force index (ready for HNSW upgrade)
-- Explainable matches with shared keywords
+---
 
-### Semantic Graph (`extension/src/utils/semantic-graph.ts`)
-- Automatic relationship detection
-- Path finding for explainability
-- Cluster detection
+## 🔒 Privacy Perimeter
 
-### Core Services
-- **Recall Service**: Semantic search with explainability
-- **Proactivity Engine**: Pattern detection and suggestions
-- **Session Service**: Session comparison and merging
-- **Shortcut Generator**: Auto-shortcut creation
-- **Activity Insights**: Browsing analytics
-- **Action Executor**: Browser automation
-
-### Embedding Worker (`extension/src/web-workers/embedding.worker.ts`)
-- WASM-ready architecture
-- High-quality fallback embedding generator
-- Deterministic, meaningful vectors
-
-## 📊 Performance Optimizations
-
-- **Background Workers**: Heavy computation offloaded to web workers
-- **Lazy Loading**: Services loaded on-demand
-- **Caching**: Embedding cache to avoid recomputation
-- **IndexedDB Indexes**: Fast queries with proper indexes
-- **Debounced Capture**: Smart page capture timing
-- **Storage Limits**: Automatic pruning of old data
-
-## 🔒 Privacy Features
-
-1. **Local-Only Processing**: No data leaves your device
-2. **User Control**: Pause capture, delete data anytime
-3. **Selective Forget**: Remove data by domain/date/keyword
-4. **Privacy Rules**: Automatic exclusion of sensitive content
-5. **Data Export**: Full control over your data
-
-## 🎨 UI Features
-
-- **Modern Design**: Beautiful, responsive TailwindCSS UI
-- **Real-Time Updates**: Live polling from IndexedDB
-- **Explain-Why Modal**: See why results matched
-- **Activity Insights**: Visual analytics
-- **Privacy Dashboard**: Complete data control
-
-## 🏅 Hackathon Highlights
-
-### What Makes This Winner-Ready
-
-1. **Production Quality**: Not a prototype - real, working code
-2. **Complete Architecture**: All services implemented and integrated
-3. **Performance**: Optimized for speed and efficiency
-4. **Privacy First**: Zero cloud dependencies, full user control
-5. **Beautiful UI**: Modern, polished interface
-6. **Extensible**: Ready for WASM model integration
-7. **Well Documented**: Clear code structure and comments
-
-### Innovation Points
-
-- **Semantic Graph**: Automatic relationship mapping
-- **Proactive Intelligence**: Anticipates user needs
-- **Session Intelligence**: Compare and merge browsing sessions
-- **Explainable AI**: Shows why results matched
-- **Privacy UX**: Makes privacy controls a feature, not an afterthought
-
-## 📈 Future Enhancements
-
-- [ ] WASM model integration (onnxruntime-web or ggml-wasm)
-- [ ] HNSW vector index for faster search
-- [ ] Advanced clustering algorithms
-- [ ] Cross-device sync (optional, encrypted)
-- [ ] Browser automation enhancements
-- [ ] Mobile app companion
-
-## 🎯 Use Cases
-
-- **Students**: Recall fragmented research quickly
-- **Professionals**: Cluster tabs, autofill forms, summarize reports
-- **Travelers**: Retrieve itineraries and last-seen offers
-- **Researchers**: Compare sessions, merge findings, spot gaps
-
-## 📝 License
-
-MIT License - Built for Samsung Prism WebAgent Hackathon
+We believe your history belongs to you.
+- **Zero Cloud**: No accounts, no sync, no data leakage.
+- **Selective Forget**: Delete any domain or time range from your memory instantly.
+- **Pause Anytime**: One click to stop Cortex from saving your sessions.
 
 ---
 

@@ -12,11 +12,11 @@
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
-        background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
-        min-width: 400px;
-        color: #1f2937;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #f8fafc;
+        min-width: 320px;
+        color: #1e293b;
+        overflow: hidden;
       }
 
       .container {
@@ -34,122 +34,117 @@
         width: 32px;
         height: 32px;
         border-radius: 8px;
-        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+        background: #3b82f6;
         display: flex;
         align-items: center;
         justify-content: center;
         color: white;
         font-weight: bold;
         font-size: 16px;
+        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+      }
+
+      .title-container {
+        display: flex;
+        flex-direction: column;
       }
 
       .title {
-        font-size: 20px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font-size: 16px;
+        font-weight: 800;
+        color: #0f172a;
+        letter-spacing: -0.02em;
       }
 
-      .status-section {
+      .subtitle {
+        font-size: 9px;
+        font-weight: 700;
+        color: #3b82f6;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .status-box {
         background: white;
         border-radius: 12px;
         padding: 16px;
         margin-bottom: 16px;
-        border: 1px solid #e5e7eb;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
       }
 
-      .status-item {
+      .status-row {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 12px;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid #f1f5f9;
       }
 
-      .status-item:last-child {
-        margin-bottom: 0;
+      .status-row:last-child {
+        border-bottom: none;
       }
 
-      .status-indicator {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: #10b981;
-      }
-
-      .status-text {
-        flex: 1;
-      }
-
-      .status-label {
+      .label {
         font-size: 12px;
-        color: #6b7280;
-        text-transform: uppercase;
-        font-weight: 600;
+        color: #64748b;
+        font-weight: 500;
       }
 
-      .status-value {
-        font-size: 14px;
-        font-weight: 600;
-        color: #1f2937;
+      .value {
+        font-size: 13px;
+        font-weight: 700;
+        color: #0f172a;
       }
 
-      .actions {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin-right: 6px;
+        display: inline-block;
       }
 
       .btn {
-        padding: 10px 16px;
+        width: 100%;
+        padding: 12px;
         border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
         cursor: pointer;
         transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 8px;
       }
 
       .btn-primary {
-        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+        background: #3b82f6;
         color: white;
       }
 
       .btn-primary:hover {
-        opacity: 0.9;
-        transform: translateY(-2px);
+        background: #2563eb;
       }
 
       .btn-secondary {
-        background: white;
-        color: #6366f1;
-        border: 1px solid #e5e7eb;
+        background: #f1f5f9;
+        color: #475569;
       }
 
       .btn-secondary:hover {
-        background: #f9fafb;
+        background: #e2e8f0;
       }
 
-      .info-text {
-        font-size: 12px;
-        color: #6b7280;
+      .footer {
         margin-top: 12px;
         text-align: center;
-      }
-
-      .loading {
-        display: inline-block;
-        animation: spin 1s linear infinite;
-      }
-
-      @keyframes spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
+        font-size: 10px;
+        color: #94a3b8;
+        font-weight: 500;
       }
     </style>
   </head>
@@ -158,44 +153,38 @@
     <div class="container">
       <div class="header">
         <div class="logo">C</div>
-        <div class="title">Cortex</div>
-      </div>
-
-      <div class="status-section">
-        <div class="status-item">
-          <div class="status-indicator"></div>
-          <div class="status-text">
-            <div class="status-label">Capture Status</div>
-            <div class="status-value" id="captureStatus">Active</div>
-          </div>
-        </div>
-        <div class="status-item">
-          <div class="status-indicator"></div>
-          <div class="status-text">
-            <div class="status-label">Pages Captured</div>
-            <div class="status-value" id="pageCount">0</div>
-          </div>
-        </div>
-        <div class="status-item">
-          <div class="status-indicator"></div>
-          <div class="status-text">
-            <div class="status-label">Memory Size</div>
-            <div class="status-value" id="storageSize">0 MB</div>
-          </div>
+        <div class="title-container">
+          <div class="title">Cortex</div>
+          <div class="subtitle">Personal Web Helper</div>
         </div>
       </div>
 
-      <div class="actions">
-        <button class="btn btn-primary" id="openDashboard">
-          📊 Open Dashboard
-        </button>
-        <button class="btn btn-secondary" id="openSettings">
-          ⚙️ Privacy Settings
-        </button>
+      <div class="status-box">
+        <div class="status-row">
+          <span class="label">App Status</span>
+          <span class="value">
+            <span class="dot" style="background: #10b981;"></span>Active
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="label">Saved Pages</span>
+          <span class="value" id="pageCount">0</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Memory Size</span>
+          <span class="value" id="storageSize">0 MB</span>
+        </div>
       </div>
 
-      <div class="info-text">
-        All data stays on your device. 100% private.
+      <button class="btn btn-primary" id="openDashboard">
+        Open Dashboard
+      </button>
+      <button class="btn btn-secondary" id="openSettings">
+        Privacy Settings
+      </button>
+
+      <div class="footer">
+        Your data is saved safely on your computer.
       </div>
     </div>
 

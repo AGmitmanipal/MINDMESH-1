@@ -7,7 +7,7 @@
  */
 
 import type { PageContext } from "@shared/extension-types";
-import { extractReadableText, extractKeywords, getFaviconUrl, getDomain } from "@client/lib/text-utils";
+import { extractReadableText, extractKeywords, getFaviconUrl, getDomain } from "@/lib/text-utils";
 
 /**
  * Extract relevant page information

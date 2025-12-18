@@ -13,7 +13,7 @@ document.getElementById('openSettings').addEventListener('click', () => {
 // Load statistics from IndexedDB
 async function loadStats() {
   try {
-    const dbRequest = indexedDB.open('cortex-memory', 1);
+    const dbRequest = indexedDB.open('cortex-memory', 2);
 
     dbRequest.onsuccess = () => {
       const db = dbRequest.result;

@@ -6,40 +6,47 @@ export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-border">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-[100] w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+      <div className="max-w-7xl mx-auto px-6 lg:px-12">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link
             to="/"
-            className="flex items-center gap-2 text-xl font-bold gradient-text"
+            className="flex items-center gap-3 group"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-sm font-bold">
+            <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white text-lg font-black shadow-sm group-hover:scale-105 transition-transform">
               C
             </div>
-            <span className="hidden sm:inline">Cortex</span>
+            <div className="flex flex-col">
+              <span className="text-lg font-bold tracking-tight leading-none text-slate-900 dark:text-white">CORTEX</span>
+              <span className="text-[9px] font-bold tracking-wider text-primary uppercase">Web Helper</span>
+            </div>
           </Link>
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-8">
             <Link
               to="/"
-              className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+              className="text-sm font-semibold text-slate-500 hover:text-primary transition-all"
             >
               Home
             </Link>
             <Link
               to="/dashboard"
-              className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+              className="text-sm font-semibold text-slate-500 hover:text-primary transition-all"
             >
               Dashboard
             </Link>
             <Link
               to="/privacy"
-              className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+              className="text-sm font-semibold text-slate-500 hover:text-primary transition-all"
             >
               Privacy
             </Link>
+            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-2" />
+            <button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-all shadow-sm">
+              Get Started
+            </button>
           </nav>
 
           {/* Mobile Menu Button */}

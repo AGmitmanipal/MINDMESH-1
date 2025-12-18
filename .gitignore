@@ -25,3 +25,10 @@ dist-ssr
 
 .config/
 !.env
+
+HACKATHON_SUMMARY.md
+
+
+.pnpm-store/
+node_modules/
+dist/

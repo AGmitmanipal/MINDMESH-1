@@ -135,308 +135,261 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-foreground relative overflow-hidden">
+      <div className="main-bg" />
       <Header />
 
-      <div className="flex">
+      <div className="flex relative z-10">
         {/* Sidebar */}
         {sidebarOpen && (
-          <aside className="hidden lg:flex w-64 border-r border-border flex-col bg-white dark:bg-slate-950">
-            <div className="p-6 border-b border-border">
-              <h2 className="text-sm font-bold text-primary mb-4">CORTEX</h2>
-              <nav className="space-y-2">
-                <button
-                  onClick={() => setActiveTab("search")}
-                  className={`w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === "search"
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted"
-                  }`}
-                >
-                  <Search className="inline w-4 h-4 mr-2" />
-                  Search Memory
-                </button>
-                <button
-                  onClick={() => setActiveTab("clusters")}
-                  className={`w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === "clusters"
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted"
-                  }`}
-                >
-                  <Sidebar className="inline w-4 h-4 mr-2" />
-                  Tab Clusters
-                </button>
-                <button
-                  onClick={() => setActiveTab("settings")}
-                  className={`w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === "settings"
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted"
-                  }`}
-                >
-                  <Settings className="inline w-4 h-4 mr-2" />
-                  Privacy Settings
-                </button>
-              </nav>
-            </div>
+          <aside className="hidden lg:flex w-72 h-[calc(100vh-64px)] flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
+            <div className="p-8 space-y-8 flex-1 overflow-y-auto">
+              <div>
+                <h2 className="text-xs font-bold tracking-wider text-slate-400 mb-6 uppercase">Menu</h2>
+                <nav className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab("search")}
+                    className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                      activeTab === "search"
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <Search className="w-4 h-4 mr-3" />
+                    Smart Search
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("clusters")}
+                    className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                      activeTab === "clusters"
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <Sidebar className="w-4 h-4 mr-3" />
+                    Auto Groups
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("settings")}
+                    className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                      activeTab === "settings"
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <Settings className="w-4 h-4 mr-3" />
+                    Safe & Private
+                  </button>
+                </nav>
+              </div>
 
-            {/* Statistics */}
-            <div className="p-6 space-y-4 border-b border-border">
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">
-                  MEMORY SIZE
-                </p>
-                <p className="text-2xl font-bold text-primary">
-                  {formatStorageSize(storageSize)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">
-                  PAGES INDEXED
-                </p>
-                <p className="text-2xl font-bold text-primary">{pageCount}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">
-                  ACTIVE CLUSTERS
-                </p>
-                <p className="text-2xl font-bold text-primary">
-                  {clusters.length}
-                </p>
-              </div>
-            </div>
-
-            {/* Help */}
-            <div className="mt-auto p-6">
-              {pageCount === 0 && (
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg mb-4 border border-blue-200 dark:border-blue-800">
-                  <p className="text-xs text-blue-700 dark:text-blue-200">
-                    💡 <strong>Tip:</strong> Install the Cortex extension to start capturing your browsing.
-                  </p>
+              {/* Statistics */}
+              <div className="space-y-6 pt-6 border-t border-slate-100 dark:border-slate-800">
+                <h2 className="text-xs font-bold tracking-wider text-slate-400 mb-2 uppercase">Your Stats</h2>
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Storage Used</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-white">{formatStorageSize(storageSize)}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Saved Pages</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-white">{pageCount}</p>
+                  </div>
                 </div>
-              )}
-              <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-sm font-medium">
-                <HelpCircle className="w-4 h-4" />
-                Help & Feedback
+              </div>
+            </div>
+
+            {/* Help & Branding */}
+            <div className="p-8 border-t border-slate-100 dark:border-slate-800">
+              <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 mb-6 border border-blue-100 dark:border-blue-800">
+                <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
+                  <span className="font-bold">Did you know?</span> Cortex organizes your web life automatically so you never lose a link again.
+                </p>
+              </div>
+              <button className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xs font-bold text-slate-600 dark:text-slate-400">
+                <HelpCircle className="w-3.5 h-3.5" />
+                How it works
               </button>
             </div>
           </aside>
         )}
 
         {/* Main Content */}
-        <main className="flex-1 overflow-auto">
-          <div className="max-w-6xl mx-auto p-6 lg:p-8">
+        <main className="flex-1 h-[calc(100vh-64px)] overflow-y-auto">
+          <div className="max-w-5xl mx-auto p-8 lg:p-12">
             {isLoading ? (
-              <div className="flex items-center justify-center h-96">
-                <Loader className="w-8 h-8 animate-spin text-primary" />
+              <div className="flex flex-col items-center justify-center h-full space-y-4">
+                <Loader className="w-10 h-10 animate-spin text-primary" />
+                <p className="text-sm font-medium text-slate-500">Loading your memories...</p>
               </div>
             ) : activeTab === "search" ? (
-              <div>
-                <h1 className="text-3xl lg:text-4xl font-bold mb-2">
-                  Semantic Memory Search
-                </h1>
-                <p className="text-muted-foreground mb-8">
-                  Search across your browsing history by meaning. "React
-                  performance" finds all related pages, not just exact matches.
-                </p>
+              <div className="space-y-10 animate-in fade-in duration-500">
+                <div className="space-y-3">
+                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Find <span className="text-primary text-secondary">Anything.</span>
+                  </h1>
+                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    Search your browsing history by meaning. Type what you're looking for, and we'll find the most relevant pages.
+                  </p>
+                </div>
 
                 {/* Search Box */}
-                <div className="mb-8">
-                  <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <div className="relative group">
+                  <div className="relative flex items-center bg-white dark:bg-slate-900 rounded-2xl border-2 border-slate-200 dark:border-slate-800 focus-within:border-primary transition-all shadow-sm">
+                    <Search className="ml-6 w-5 h-5 text-slate-400" />
                     <input
                       type="text"
-                      placeholder="Search by meaning... e.g., 'React performance optimization'"
+                      placeholder="e.g., 'that travel blog I saw last week' or 'React tips'"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3 rounded-lg border border-border bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full px-6 py-5 bg-transparent focus:outline-none text-lg font-medium"
                     />
                   </div>
                 </div>
 
                 {/* Results */}
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 pb-20">
                   {filteredMemories.map((memory) => (
                     <div
                       key={memory.id}
                       onClick={() => setSelectedMemory(memory)}
-                      className="p-6 rounded-lg border border-border hover:border-primary/50 hover:shadow-lg cursor-pointer transition-all bg-white dark:bg-slate-900/50"
+                      className="group p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-primary/50 hover:shadow-md cursor-pointer transition-all flex flex-col md:flex-row gap-6"
                     >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold mb-1">
+                      <div className="flex-1 space-y-3">
+                        <div className="space-y-1">
+                          <h3 className="text-xl font-bold group-hover:text-primary transition-colors line-clamp-1 text-slate-900 dark:text-white">
                             {memory.title}
                           </h3>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="text-xs text-slate-400 truncate font-medium">
                             {memory.url}
                           </p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-primary">
-                            {Math.round(memory.similarity * 100)}%
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            match
-                          </p>
+                        <p className="text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 text-sm">
+                          {memory.snippet}
+                        </p>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {memory.keywords.map((kw) => (
+                            <span
+                              key={kw}
+                              className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider rounded-md"
+                            >
+                              {kw}
+                            </span>
+                          ))}
                         </div>
                       </div>
-
-                      <p className="text-muted-foreground mb-4">
-                        {memory.snippet}
-                      </p>
-
-                      <div className="flex flex-wrap gap-2">
-                        {memory.keywords.map((kw) => (
-                          <span
-                            key={kw}
-                            className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-full font-medium"
-                          >
-                            {kw}
-                          </span>
-                        ))}
+                      <div className="flex md:flex-col justify-between items-end md:w-24">
+                        <div className="text-right">
+                          <p className="text-2xl font-black text-primary leading-none">
+                            {Math.round(memory.similarity * 100)}%
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mt-1">Match</p>
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          {new Date(memory.timestamp).toLocaleDateString()}
+                        </p>
                       </div>
-
-                      <p className="text-xs text-muted-foreground mt-4">
-                        {memory.timestamp}
-                      </p>
                     </div>
                   ))}
                 </div>
-
-                {filteredMemories.length === 0 && (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground mb-4">
-                      {memories.length === 0
-                        ? "No pages indexed yet. Click 'Add Sample Data' in the sidebar to get started!"
-                        : "No results found. Try a different search."}
-                    </p>
-                  </div>
-                )}
               </div>
             ) : activeTab === "clusters" ? (
-              <div>
-                <h1 className="text-3xl lg:text-4xl font-bold mb-2">
-                  Tab Clustering
-                </h1>
-                <p className="text-muted-foreground mb-8">
-                  Your browsing organized by topic. AI-powered clustering
-                  eliminates tab chaos.
-                </p>
+              <div className="space-y-10 animate-in fade-in duration-500">
+                <div className="space-y-3">
+                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Auto <span className="text-primary text-secondary">Groups.</span>
+                  </h1>
+                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    We've organized your recently visited pages into groups so you can easily find related content.
+                  </p>
+                </div>
 
-                {clusters.length === 0 ? (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground">
-                      No clusters yet. Add some pages to get started!
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {clusters.map((cluster) => (
-                      <div
-                        key={cluster.id}
-                        className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow bg-white dark:bg-slate-900/50"
-                      >
-                        <div
-                          className={`h-32 bg-gradient-to-br ${cluster.color}`}
-                        />
-                        <div className="p-6">
-                          <h3 className="text-xl font-bold mb-2">
-                            {cluster.name}
-                          </h3>
-                          <p className="text-sm text-muted-foreground mb-4">
-                            {cluster.itemCount} related pages
-                          </p>
-                          <div className="space-y-2">
-                            {cluster.pages.map((page) => (
-                              <a
-                                key={page.id}
-                                href={page.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block text-sm text-primary hover:underline truncate"
-                              >
-                                {page.title}
-                              </a>
-                            ))}
-                          </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
+                  {clusters.map((cluster) => (
+                    <div
+                      key={cluster.id}
+                      className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all"
+                    >
+                      <div className={`h-3 bg-gradient-to-r ${cluster.color}`} />
+                      <div className="p-8 space-y-6">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{cluster.name}</h3>
+                          <span className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-bold uppercase text-slate-500">
+                            {cluster.itemCount} Pages
+                          </span>
                         </div>
+                        <div className="space-y-3">
+                          {cluster.pages.map((page) => (
+                            <a
+                              key={page.id}
+                              href={page.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center group/link"
+                            >
+                              <div className="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover/link:bg-primary mr-3 transition-all" />
+                              <span className="text-sm text-slate-500 group-hover/link:text-primary transition-colors truncate">
+                                {page.title}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                        <button className="w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-primary hover:text-white transition-all text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          View All Pages
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
-              <div>
-                <h1 className="text-3xl lg:text-4xl font-bold mb-2">
-                  Privacy Settings
-                </h1>
-                <p className="text-muted-foreground mb-8">
-                  Complete control over your data. All processing happens
-                  locally on your device.
-                </p>
+              <div className="space-y-10 animate-in fade-in duration-500">
+                <div className="space-y-3">
+                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Safe & <span className="text-primary text-secondary">Private.</span>
+                  </h1>
+                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    Everything stays on your device. We never send your browsing data to any servers. You're in total control.
+                  </p>
+                </div>
 
-                <div className="space-y-6 max-w-2xl">
-                  {/* Capture Control */}
-                  <div className="p-6 rounded-lg border border-border bg-white dark:bg-slate-900/50">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">
-                        Capture Control
-                      </h3>
-                      <div className="w-12 h-6 bg-primary rounded-full" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
+                   {/* Capture Control */}
+                   <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
+                        <Loader className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-emerald-600 uppercase">System Active</span>
+                        <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Memory capture is currently active. Toggle to pause
-                      recording new pages.
-                    </p>
-                  </div>
-
-                  {/* Selective Forget */}
-                  <div className="p-6 rounded-lg border border-border bg-white dark:bg-slate-900/50">
-                    <h3 className="text-lg font-semibold mb-4">
-                      Selective Forget
-                    </h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Remove data by domain, date range, or specific pages.
-                    </p>
-                    <button className="px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-sm font-medium transition-colors">
-                      Forget by Domain
+                    <div>
+                      <h3 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">Auto Saving</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">
+                        Cortex is currently saving the pages you visit so you can find them later.
+                      </p>
+                    </div>
+                    <button className="w-full py-4 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-bold uppercase tracking-wider hover:bg-red-50 hover:text-red-600 transition-all">
+                      Pause Saving
                     </button>
                   </div>
 
-                  {/* Data Export */}
-                  <div className="p-6 rounded-lg border border-border bg-white dark:bg-slate-900/50">
-                    <h3 className="text-lg font-semibold mb-4">Data Export</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Export your entire memory graph as JSON for backup or
-                      analysis.
-                    </p>
-                    <button className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-                      Export Data
-                    </button>
-                  </div>
-
-                  {/* Storage Info */}
-                  <div className="p-6 rounded-lg border border-border bg-white dark:bg-slate-900/50">
-                    <h3 className="text-lg font-semibold mb-4">
-                      Local Storage
-                    </h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Used:</span>
-                        <span className="font-semibold">
-                          {formatStorageSize(storageSize)} / 50 MB
-                        </span>
-                      </div>
-                      <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                        <div
-                          className="bg-primary h-full"
-                          style={{
-                            width: `${Math.min((storageSize / (50 * 1024 * 1024)) * 100, 100)}%`,
-                          }}
-                        />
-                      </div>
+                  {/* Export */}
+                  <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 w-fit">
+                      <Settings className="w-6 h-6 text-slate-600 dark:text-slate-400" />
                     </div>
+                    <div>
+                      <h3 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">Backup Data</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">
+                        Download a copy of everything Cortex has saved for you.
+                      </p>
+                    </div>
+                    <button className="w-full py-4 rounded-xl bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-all shadow-sm">
+                      Download Backup
+                    </button>
                   </div>
                 </div>
               </div>
@@ -448,67 +401,64 @@ export default function Dashboard() {
       {/* Explain Why Modal */}
       {selectedMemory && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-6 animate-in fade-in duration-200"
           onClick={() => setSelectedMemory(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-8"
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-10 space-y-8 relative overflow-hidden border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-2xl font-bold mb-4">Explain Why</h2>
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-1">
-                  Page Title
-                </p>
-                <p className="font-semibold">{selectedMemory.title}</p>
+            <div className="space-y-2">
+              <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Why this result?</h2>
+              <p className="text-slate-500 text-sm font-medium">We found this page because it matches your search intent.</p>
+            </div>
+
+            <div className="space-y-6">
+              <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 space-y-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Page Title</p>
+                <p className="font-bold text-lg text-slate-900 dark:text-white leading-tight">{selectedMemory.title}</p>
+                <p className="text-xs text-slate-400 truncate">{selectedMemory.url}</p>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-1">
-                  Similarity Score
-                </p>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 bg-muted rounded-full h-2">
-                    <div
-                      className="bg-primary h-full rounded-full"
-                      style={{
-                        width: `${selectedMemory.similarity * 100}%`,
-                      }}
-                    />
-                  </div>
-                  <span className="font-bold text-primary">
-                    {Math.round(selectedMemory.similarity * 100)}%
-                  </span>
-                </div>
+
+              <div className="space-y-2">
+                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Match Strength</p>
+                 <div className="flex items-center gap-4">
+                    <div className="flex-1 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                       <div 
+                        className="h-full bg-primary"
+                        style={{ width: `${selectedMemory.similarity * 100}%` }}
+                       />
+                    </div>
+                    <span className="text-2xl font-bold text-primary">
+                      {Math.round(selectedMemory.similarity * 100)}%
+                    </span>
+                 </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-2">
-                  Shared Keywords
-                </p>
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Main Topics</p>
                 <div className="flex flex-wrap gap-2">
                   {selectedMemory.keywords.map((kw) => (
                     <span
                       key={kw}
-                      className="px-2 py-1 bg-primary/10 text-primary text-xs rounded font-medium"
+                      className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700"
                     >
                       {kw}
                     </span>
                   ))}
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-1">
-                  Reason
-                </p>
-                <p className="text-sm">
-                  This page was matched due to semantic similarity in content
-                  and shared keywords.
+
+              <div className="p-5 rounded-2xl bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30">
+                <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+                  This page was suggested because it contains specific information about your search query and shares several key topics.
                 </p>
               </div>
             </div>
+
             <button
               onClick={() => setSelectedMemory(null)}
-              className="w-full mt-6 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition-opacity"
+              className="w-full py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-bold uppercase tracking-wider rounded-xl hover:opacity-90 transition-all"
             >
               Close
             </button>
