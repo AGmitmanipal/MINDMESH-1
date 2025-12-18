@@ -6,6 +6,7 @@
 import type { MemoryNode, SemanticMatch } from "@shared/extension-types";
 import { cortexStorage } from "../utils/storage";
 import { createSemanticMatch } from "../utils/vector-search";
+import { generateEmbedding } from "../utils/embedding";
 
 export interface RecallResult {
   matches: SemanticMatch[];
@@ -21,22 +22,30 @@ export class RecallService {
   async search(
     query: string,
     limit: number = 10,
-    threshold: number = 0.5
+    threshold: number = 0.4
   ): Promise<RecallResult> {
-    // For now, use text-based search
-    // In production, generate query embedding and use vector search
-    const nodes = await cortexStorage.searchMemoryNodes(query, limit * 2);
+    console.log(`RecallService: Searching for "${query}"`);
+    
+    // Generate query embedding
+    const queryEmbedding = generateEmbedding(query, query, []);
+    
+    // Perform vector search
+    const matches = await cortexStorage.vectorSearch(queryEmbedding.vector, limit, threshold);
+    
+    console.log(`RecallService: Found ${matches.length} semantic matches`);
 
-    // Create semantic matches with explainability
-    const matches: SemanticMatch[] = nodes
-      .map((node) => {
-        // Calculate similarity score
-        const similarity = this.calculateTextSimilarity(query, node);
-        return createSemanticMatch(node, similarity, query);
-      })
-      .filter((match) => match.similarity >= threshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, limit);
+    // If no semantic matches, fall back to keyword search
+    if (matches.length === 0) {
+      console.log("RecallService: Falling back to keyword search");
+      const nodes = await cortexStorage.searchMemoryNodes(query, limit);
+      const fallbackMatches = nodes.map(node => createSemanticMatch(node, 0.3, query));
+      return {
+        matches: fallbackMatches,
+        query,
+        timestamp: Date.now(),
+        totalResults: fallbackMatches.length,
+      };
+    }
 
     return {
       matches,
@@ -50,8 +59,8 @@ export class RecallService {
    * Get related pages for a given URL
    */
   async getRelatedPages(url: string, limit: number = 5): Promise<MemoryNode[]> {
-    const allNodes = await cortexStorage.getAllMemoryNodes();
-    const targetNode = allNodes.find((n) => n.url === url);
+    const nodes = await cortexStorage.getAllMemoryNodes(1000); // Reasonable scan limit
+    const targetNode = nodes.find((n) => n.url === url);
 
     if (!targetNode) {
       return [];
@@ -68,9 +77,10 @@ export class RecallService {
     hours: number = 24,
     limit: number = 20
   ): Promise<MemoryNode[]> {
-    const allNodes = await cortexStorage.getAllMemoryNodes();
     const cutoff = Date.now() - hours * 60 * 60 * 1000;
-
+    // We can use the existing getAllMemoryNodes but we need a date range version
+    const allNodes = await cortexStorage.getAllMemoryNodes(limit * 5);
+    
     return allNodes
       .filter((node) => node.timestamp >= cutoff)
       .sort((a, b) => b.timestamp - a.timestamp)
@@ -81,27 +91,9 @@ export class RecallService {
    * Get pages by domain
    */
   async getPagesByDomain(domain: string): Promise<MemoryNode[]> {
-    const allNodes = await cortexStorage.getAllMemoryNodes();
-    return allNodes.filter((node) => node.metadata.domain === domain);
-  }
-
-  /**
-   * Calculate text similarity (simple implementation)
-   */
-  private calculateTextSimilarity(query: string, node: MemoryNode): number {
-    const queryLower = query.toLowerCase();
-    const searchText = `${node.title} ${node.readableText.slice(0, 500)} ${node.keywords.join(" ")}`.toLowerCase();
-
-    const queryWords = new Set(queryLower.split(/\s+/).filter((w) => w.length > 2));
-    const textWords = new Set(searchText.split(/\s+/).filter((w) => w.length > 2));
-
-    const intersection = Array.from(queryWords).filter((w) => textWords.has(w));
-    const union = new Set([...queryWords, ...textWords]);
-
-    // Jaccard similarity
-    return union.size > 0 ? intersection.length / union.size : 0;
+    const nodes = await cortexStorage.getAllMemoryNodes(500);
+    return nodes.filter((node) => node.metadata.domain === domain);
   }
 }
 
 export const recallService = new RecallService();
-

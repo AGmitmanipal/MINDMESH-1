@@ -142,4 +142,11 @@
   .main-bg {
     @apply fixed inset-0 -z-10 bg-slate-50 dark:bg-slate-950;
   }
+
+  /* Safety branding cleanup */
+  img[src*="builder.io"],
+  [class*="PoweredBy"],
+  [class*="builder-footer"] {
+    display: none !important;
+  }
 }

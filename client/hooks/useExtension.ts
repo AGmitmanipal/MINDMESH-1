@@ -1,166 +1,269 @@
-/**
- * Hook for communicating with Cortex browser extension
- */
-
-import { useCallback, useState, useEffect } from "react";
-import type { ExtensionMessage, SemanticMatch, MemoryNode } from "@shared/extension-types";
-
-interface ExtensionResponse<T = unknown> {
-  success: boolean;
-  error?: string;
-  data?: T;
-}
+import { useState, useEffect, useCallback } from "react";
+import type { MemoryNode, ExtensionMessage } from "@shared/extension-types";
 
 export function useExtension() {
   const [isAvailable, setIsAvailable] = useState(false);
   const [extensionId, setExtensionId] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
 
-  // Check if extension is available
+  // Initialize extension ID from URL, window, or custom event
   useEffect(() => {
-    // Try to detect extension
-    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id) {
-      setIsAvailable(true);
-      setExtensionId(chrome.runtime.id);
-    } else {
-      // Check if we can connect to extension
-      if (typeof chrome !== "undefined" && chrome.runtime) {
-        chrome.runtime.sendMessage({ type: "PING" }, (response) => {
-          if (!chrome.runtime.lastError) {
-            setIsAvailable(true);
-          }
-        });
-      }
+    const params = new URLSearchParams(window.location.search);
+    const idFromUrl = params.get("extId");
+    
+    if (idFromUrl) {
+      setExtensionId(idFromUrl);
+      (window as any).CORTEX_EXTENSION_ID = idFromUrl;
+      console.log("Cortex: Extension ID from URL:", idFromUrl);
+    } else if ((window as any).CORTEX_EXTENSION_ID) {
+      const existingId = (window as any).CORTEX_EXTENSION_ID;
+      setExtensionId(existingId);
+      console.log("Cortex: Extension ID from window:", existingId);
     }
+
+    // 1. Listen for extension ready event
+    const handleReady = (event: any) => {
+      if (event.detail?.id) {
+        setExtensionId(event.detail.id);
+        setIsAvailable(true);
+        setIsChecking(false);
+      }
+    };
+    window.addEventListener("cortex-extension-ready", handleReady);
+
+    // 2. Listen for postMessage handshake response
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "CORTEX_ID_RESPONSE" && event.data.id) {
+        setExtensionId(event.data.id);
+        setIsAvailable(true);
+        setIsChecking(false);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+
+    // 3. Fallback: check if content script already set the ID on window
+    const checkWindow = () => {
+      const windowId = (window as any).CORTEX_EXTENSION_ID;
+      if (windowId && !extensionId) {
+        setExtensionId(windowId);
+        setIsAvailable(true);
+        setIsChecking(false);
+        return true;
+      }
+      return false;
+    };
+
+    // Immediate check
+    checkWindow();
+
+    // 4. Continuous Handshake (Query for the extension every second)
+    const handshakeInterval = setInterval(() => {
+      if (!extensionId) {
+        window.postMessage({ type: "CORTEX_QUERY_EXTENSION" }, "*");
+        checkWindow();
+      }
+    }, 1000);
+    
+    return () => {
+      window.removeEventListener("cortex-extension-ready", handleReady);
+      window.removeEventListener("message", handleMessage);
+      clearInterval(handshakeInterval);
+    };
   }, []);
 
-  /**
-   * Send message to extension
-   */
-  const sendMessage = useCallback(
-    async <T = unknown>(message: ExtensionMessage): Promise<ExtensionResponse<T>> => {
-      if (!isAvailable || !chrome.runtime) {
-        return { success: false, error: "Extension not available" };
-      }
+  // Check if extension is available with retry logic
+  useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 5;
+    let retryTimeout: NodeJS.Timeout;
 
-      return new Promise((resolve) => {
-        chrome.runtime.sendMessage(message, (response: ExtensionResponse<T>) => {
+    const checkExtension = async () => {
+      const targetId = extensionId || (window as any).CORTEX_EXTENSION_ID;
+      
+      try {
+        // If we have chrome.runtime, try pinging the extension
+        if (typeof chrome !== "undefined" && chrome.runtime) {
+          
+          // Try internal message first (if we're inside the extension)
+          if (chrome.runtime.sendMessage && !targetId) {
+            chrome.runtime.sendMessage({ type: "PING" }, (response) => {
+              if (chrome.runtime.lastError) {
+                console.log("Cortex: Not in extension context, will use external messaging");
+              } else if (response?.success) {
+                console.log("Cortex: Extension available (internal)");
+                setIsAvailable(true);
+                setIsChecking(false);
+              }
+            });
+          }
+          
+          // Try external message with ID
+          if (targetId && chrome.runtime.sendMessage) {
+            console.log("Cortex: Pinging extension with ID:", targetId);
+            chrome.runtime.sendMessage(targetId, { type: "PING" }, (response: any) => {
+              if (chrome.runtime.lastError) {
+                console.log("Cortex: Ping failed:", chrome.runtime.lastError.message);
+                
+                // Retry if we haven't exceeded max retries
+                if (retryCount < maxRetries) {
+                  retryCount++;
+                  console.log(`Cortex: Retrying ping (${retryCount}/${maxRetries})...`);
+                  retryTimeout = setTimeout(checkExtension, 1000);
+                } else {
+                  console.log("Cortex: Extension not available after retries");
+                  setIsAvailable(false);
+                  setIsChecking(false);
+                }
+              } else if (response?.success) {
+                console.log("Cortex: Extension available (external)");
+                setIsAvailable(true);
+                setIsChecking(false);
+              }
+            });
+          } else if (!targetId) {
+            // No ID yet, wait for it
+            console.log("Cortex: Waiting for extension ID...");
+            if (retryCount < maxRetries) {
+              retryCount++;
+              retryTimeout = setTimeout(checkExtension, 500);
+            } else {
+              setIsChecking(false);
+            }
+          }
+        } else {
+          console.log("Cortex: chrome.runtime not available");
+          setIsAvailable(false);
+          setIsChecking(false);
+        }
+      } catch (e) {
+        console.error("Cortex: Error checking extension:", e);
+        setIsAvailable(false);
+        setIsChecking(false);
+      }
+    };
+
+    // Start checking after a small delay to let content script inject
+    const initialDelay = setTimeout(() => {
+      checkExtension();
+    }, 100);
+
+    return () => {
+      clearTimeout(initialDelay);
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, [extensionId]);
+
+  const sendMessage = useCallback(async <T>(message: ExtensionMessage): Promise<{ success: boolean; data?: T; error?: string }> => {
+    const targetId = extensionId || (window as any).CORTEX_EXTENSION_ID;
+
+    if (!targetId) {
+      console.error("Cortex: No extension ID available for messaging");
+      return { success: false, error: "Extension ID not available" };
+    }
+
+    return new Promise((resolve) => {
+      const timeoutMs = 10000; // Increased to 10 seconds
+      const timeout = setTimeout(() => {
+        console.error(`Cortex: Message ${message.type} timed out after ${timeoutMs/1000}s`);
+        resolve({ success: false, error: "Request timed out" });
+      }, timeoutMs);
+
+      try {
+        if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
+          clearTimeout(timeout);
+          console.warn("Cortex: Chrome runtime not available for messaging");
+          resolve({ success: false, error: "Chrome runtime not available" });
+          return;
+        }
+
+        const start = Date.now();
+        console.log(`Cortex: Sending message ${message.type} to extension ${targetId}`);
+        
+        // Always use external messaging with extension ID (we're on a webpage, not inside extension)
+        chrome.runtime.sendMessage(targetId, message, (extResponse: any) => {
+          const duration = Date.now() - start;
+          clearTimeout(timeout);
+          
           if (chrome.runtime.lastError) {
+            console.error(`Cortex: Message ${message.type} failed after ${duration}ms:`, chrome.runtime.lastError.message);
             resolve({ success: false, error: chrome.runtime.lastError.message });
           } else {
-            resolve(response || { success: false, error: "No response" });
+            console.log(`Cortex: Message ${message.type} response received in ${duration}ms:`, extResponse);
+            // Fix: The extension already returns { success: boolean, data?: T, error?: string }
+            // We should resolve with it directly to avoid double wrapping
+            resolve(extResponse || { success: false, error: "Empty response from extension" });
           }
         });
-      });
-    },
-    [isAvailable]
-  );
-
-  /**
-   * Search memory via extension
-   */
-  const searchMemory = useCallback(
-    async (query: string, limit: number = 10): Promise<SemanticMatch[]> => {
-      const response = await sendMessage<{ matches: SemanticMatch[] }>({
-        type: "SEARCH_MEMORY",
-        payload: { query, limit },
-      });
-
-      if (response.success && response.data) {
-        return response.data.matches;
+      } catch (error) {
+        clearTimeout(timeout);
+        console.error("Cortex: Exception sending message:", error);
+        resolve({ success: false, error: String(error) });
       }
-      return [];
-    },
-    [sendMessage]
-  );
-
-  /**
-   * Get proactive suggestions
-   */
-  const getSuggestions = useCallback(
-    async (currentUrl: string, limit: number = 5): Promise<MemoryNode[]> => {
-      const response = await sendMessage<{ suggestions: MemoryNode[] }>({
-        type: "GET_SUGGESTIONS",
-        payload: { currentUrl, limit },
-      });
-
-      if (response.success && response.data) {
-        return response.data.suggestions;
-      }
-      return [];
-    },
-    [sendMessage]
-  );
-
-  /**
-   * Export memory
-   */
-  const exportMemory = useCallback(async (): Promise<MemoryNode[]> => {
-    const response = await sendMessage<{ data: MemoryNode[] }>({
-      type: "EXPORT_MEMORY",
-      payload: {},
     });
+  }, [extensionId]);
 
+  const getStats = useCallback(async () => {
+    const response = await sendMessage<any>({ type: "GET_STATS", payload: {} });
+    console.log("useExtension: getStats response:", response);
+    if (response.success && response.data) {
+      return response.data;
+    }
+    return { pageCount: 0, storageSize: 0 };
+  }, [sendMessage]);
+
+  const getAllPages = useCallback(async () => {
+    const response = await sendMessage<MemoryNode[]>({ type: "GET_ALL_PAGES", payload: { limit: 100 } });
+    console.log("useExtension: getAllPages response:", response);
     if (response.success && response.data) {
       return response.data;
     }
     return [];
   }, [sendMessage]);
 
-  /**
-   * Get activity insights
-   */
-  const getActivityInsights = useCallback(async () => {
-    const response = await sendMessage({
-      type: "GET_ACTIVITY_INSIGHTS",
-      payload: {},
+  const searchMemory = useCallback(async (query: string) => {
+    const response = await sendMessage<any>({ 
+      type: "SEARCH_MEMORY", 
+      payload: { query, limit: 20 } 
     });
-
+    
     if (response.success && response.data) {
-      return response.data;
-    }
-    return null;
-  }, [sendMessage]);
-
-  /**
-   * Get shortcuts
-   */
-  const getShortcuts = useCallback(async () => {
-    const response = await sendMessage({
-      type: "GET_SHORTCUTS",
-      payload: {},
-    });
-
-    if (response.success && response.data) {
-      return response.data;
+      const data = response.data;
+      // Handle RecallResult from extension
+      if (data.matches && Array.isArray(data.matches)) {
+        return data.matches.map((match: any) => ({
+          ...match.node,
+          similarity: match.similarity
+        }));
+      }
+      
+      // Fallback if it's already an array of nodes
+      if (Array.isArray(data)) {
+        return data;
+      }
     }
     return [];
   }, [sendMessage]);
 
-  /**
-   * Update capture settings
-   */
-  const updateCaptureSettings = useCallback(
-    async (settings: Partial<{ enabled: boolean; excludeDomains: string[]; excludeKeywords: string[] }>) => {
-      const response = await sendMessage({
-        type: "UPDATE_CAPTURE_SETTINGS",
-        payload: settings,
-      });
+  const getCaptureSettings = useCallback(async () => {
+    const response = await sendMessage<any>({ type: "GET_CAPTURE_SETTINGS", payload: {} });
+    if (response.success && response.data) {
+      return response.data;
+    }
+    return { enabled: true, excludeDomains: [], excludeKeywords: [], maxStorageSize: 0 };
+  }, [sendMessage]);
 
-      return response.success;
-    },
-    [sendMessage]
-  );
+  const updateCaptureSettings = useCallback(async (settings: any) => {
+    return await sendMessage({ type: "UPDATE_CAPTURE_SETTINGS", payload: settings });
+  }, [sendMessage]);
 
   return {
     isAvailable,
-    extensionId,
+    isChecking,
     sendMessage,
+    getStats,
+    getAllPages,
     searchMemory,
-    getSuggestions,
-    exportMemory,
-    getActivityInsights,
-    getShortcuts,
+    getCaptureSettings,
     updateCaptureSettings,
   };
 }
-

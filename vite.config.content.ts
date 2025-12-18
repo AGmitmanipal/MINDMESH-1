@@ -3,18 +3,17 @@ import path from "path";
 
 export default defineConfig({
   build: {
+    emptyOutDir: false, // Don't empty because the main extension build runs first
     outDir: "dist/extension",
     minify: true,
     rollupOptions: {
       input: {
-        background: path.resolve(__dirname, "extension/src/background/worker.ts"),
-        embedding: path.resolve(__dirname, "extension/src/web-workers/embedding.worker.ts"),
-        clustering: path.resolve(__dirname, "extension/src/web-workers/clustering.worker.ts"),
+        content: path.resolve(__dirname, "extension/src/content-scripts/content.ts"),
       },
       output: {
-        entryFileNames: "[name].js",
-        chunkFileNames: "[name].js",
-        assetFileNames: "[name].[ext]",
+        format: "iife", // IIFE format is perfect for content scripts as it's self-contained
+        entryFileNames: "content.js",
+        extend: true,
       },
     },
   },
@@ -26,3 +25,4 @@ export default defineConfig({
     },
   },
 });
+

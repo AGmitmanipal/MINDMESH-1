@@ -122,7 +122,7 @@ export class ProactivityEngine {
     // Find common keywords across recent pages
     const keywordCounts = new Map<string, number>();
     recentPages.forEach((page) => {
-      page.keywords.forEach((kw) => {
+      page.keywords?.forEach((kw) => {
         keywordCounts.set(kw, (keywordCounts.get(kw) || 0) + 1);
       });
     });

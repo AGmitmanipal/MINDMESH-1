@@ -11,6 +11,9 @@ export interface PageContext {
   tabId?: number;
   sessionId?: string;
   favicon?: string;
+  metadata?: {
+    domain: string;
+  };
 }
 
 export interface Embedding {
@@ -74,8 +77,20 @@ export interface PrivacyRule {
 // Message types for extension communication
 export type ExtensionMessage =
   | {
+      type: "PING";
+      payload?: Record<string, never>;
+    }
+  | {
       type: "PAGE_CAPTURED";
       payload: PageContext;
+    }
+  | {
+      type: "GET_ALL_PAGES";
+      payload: { limit?: number };
+    }
+  | {
+      type: "GET_STATS";
+      payload: Record<string, never>;
     }
   | {
       type: "SEARCH_MEMORY";
@@ -90,6 +105,18 @@ export type ExtensionMessage =
         currentUrl: string;
         limit?: number;
       };
+    }
+  | {
+      type: "GET_PRIVACY_RULES";
+      payload: Record<string, never>;
+    }
+  | {
+      type: "ADD_PRIVACY_RULE";
+      payload: PrivacyRule;
+    }
+  | {
+      type: "DELETE_PRIVACY_RULE";
+      payload: { id: string };
     }
   | {
       type: "FORGET_DATA";
@@ -107,6 +134,10 @@ export type ExtensionMessage =
   | {
       type: "UPDATE_CAPTURE_SETTINGS";
       payload: Partial<CaptureSettings>;
+    }
+  | {
+      type: "GET_CAPTURE_SETTINGS";
+      payload?: Record<string, never>;
     }
   | {
       type: "GET_ACTIVITY_INSIGHTS";

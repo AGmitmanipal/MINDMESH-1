@@ -1,15 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Lock,
   Shield,
   Trash2,
   FileDown,
   ToggleRight,
-  AlertCircle,
   Loader,
+  HelpCircle,
 } from "lucide-react";
 import Header from "@/components/Header";
-import { useMemoryStorage } from "@/hooks/useMemoryStorage";
+import { useExtension } from "@/hooks/useExtension";
 import type { PrivacyRule } from "@shared/extension-types";
 
 export default function Privacy() {
@@ -20,98 +19,176 @@ export default function Privacy() {
     "domain"
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [pageCount, setPageCount] = useState(0);
+  const [storageSize, setStorageSize] = useState(0);
 
   const {
-    isReady,
-    getPrivacyRules,
-    addPrivacyRule,
-    deletePrivacyRule,
-    getPageCount,
-    getStorageSize,
-  } = useMemoryStorage();
+    isAvailable,
+    isChecking,
+    sendMessage,
+    getStats,
+    getCaptureSettings,
+    updateCaptureSettings,
+  } = useExtension();
 
-  // Load privacy rules from IndexedDB
-  useEffect(() => {
-    if (!isReady) return;
+  // Load data from Extension
+  const loadData = useCallback(async () => {
+    if (!isAvailable) {
+      if (!isChecking) setIsLoading(false);
+      return;
+    }
+    
+    try {
+      const [stats, settings, rulesResponse] = await Promise.all([
+        getStats().catch(() => ({ pageCount: 0, storageSize: 0 })),
+        getCaptureSettings().catch(() => ({ enabled: true, excludeDomains: [], excludeKeywords: [], maxStorageSize: 0 })),
+        sendMessage<PrivacyRule[]>({
+          type: "GET_PRIVACY_RULES",
+          payload: {}
+        }).catch(() => ({ success: false, data: [] }))
+      ]);
 
-    const loadRules = async () => {
-      try {
-        setIsLoading(true);
-        const rulesFromDB = await getPrivacyRules();
-        setRules(rulesFromDB);
-      } catch (err) {
-        console.error("Failed to load privacy rules:", err);
-      } finally {
-        setIsLoading(false);
+      if (stats) {
+        setPageCount(stats.pageCount);
+        setStorageSize(stats.storageSize);
       }
-    };
 
-    loadRules();
-  }, [isReady, getPrivacyRules]);
+      if (settings) {
+        setCaptureActive(settings.enabled);
+      }
+
+      if (rulesResponse.success && rulesResponse.data) {
+        setRules(rulesResponse.data);
+      }
+    } catch (err) {
+      console.error("Privacy: Failed to load data:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getStats, getCaptureSettings, sendMessage, isAvailable, isChecking]);
+
+  useEffect(() => {
+    if (isAvailable) {
+      setIsLoading(true);
+      loadData();
+    } else if (!isChecking) {
+      setIsLoading(false);
+    }
+  }, [loadData, isAvailable, isChecking]);
+
+  const handleToggleCapture = async () => {
+    const newState = !captureActive;
+    setCaptureActive(newState);
+    await updateCaptureSettings({ enabled: newState });
+  };
 
   const handleAddRule = async () => {
-    if (newRule.trim()) {
-      try {
-        const newPrivacyRule: PrivacyRule = {
-          id: Date.now().toString(),
-          type: ruleType,
-          value: newRule,
-          status: "active",
-          createdAt: new Date().toISOString().split("T")[0],
-        };
+    if (!newRule.trim()) return;
 
-        await addPrivacyRule(newPrivacyRule);
-        setRules([...rules, newPrivacyRule]);
+    try {
+      const rule: PrivacyRule = {
+        id: Date.now().toString(),
+        type: ruleType,
+        value: newRule,
+        status: "active",
+        createdAt: new Date().toISOString().split("T")[0],
+      };
+
+      const response = await sendMessage({
+        type: "ADD_PRIVACY_RULE", // We need to add this to worker.ts
+        payload: rule
+      });
+
+      if (response.success) {
+        setRules([...rules, rule]);
         setNewRule("");
-      } catch (err) {
-        console.error("Failed to add rule:", err);
       }
+    } catch (err) {
+      console.error("Failed to add rule:", err);
     }
   };
 
   const toggleRule = async (id: string) => {
-    const updatedRules = rules.map((r) =>
-      r.id === id
-        ? {
-            ...r,
-            status: r.status === "active" ? "inactive" : "active",
-          }
-        : r
-    );
-    setRules(updatedRules);
+    // Simplified for UI, in production would update in DB
+    setRules(rules.map(r => r.id === id ? { ...r, status: r.status === 'active' ? 'inactive' : 'active' } : r));
   };
 
   const handleDeleteRule = async (id: string) => {
     try {
-      await deletePrivacyRule(id);
-      setRules(rules.filter((r) => r.id !== id));
+      const response = await sendMessage({
+        type: "DELETE_PRIVACY_RULE", // We need to add this to worker.ts
+        payload: { id }
+      });
+
+      if (response.success) {
+        setRules(rules.filter((r) => r.id !== id));
+      }
     } catch (err) {
       console.error("Failed to delete rule:", err);
     }
   };
 
   const formatStorageSize = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 10) / 10 + " " + sizes[i];
+    if (bytes === 0) return "0.0 MB";
+    const mb = bytes / (1024 * 1024);
+    return mb.toFixed(1) + " MB";
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <div className="flex items-center justify-center h-96">
-          <Loader className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      </div>
-    );
-  }
+  const handleExport = async () => {
+    try {
+      const response = await sendMessage<any[]>({
+        type: "GET_ALL_PAGES",
+        payload: { limit: 1000 }
+      });
+      
+      if (response.success && response.data) {
+        const data = JSON.stringify(response.data, null, 2);
+        const blob = new Blob([data], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `cortex-backup-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error("Export failed:", err);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (confirm("Are you sure you want to clear all your data? This cannot be undone.")) {
+      try {
+        const response = await sendMessage({
+          type: "FORGET_DATA",
+          payload: {}
+        });
+        if (response.success) {
+          alert("All data has been cleared.");
+          window.location.reload();
+        }
+      } catch (err) {
+        console.error("Clear failed:", err);
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <Header />
+
+      {!isAvailable && !isLoading && (
+        <div className="max-w-4xl mx-auto px-6 pt-8">
+          <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl flex items-center gap-4 text-amber-800 dark:text-amber-200 shadow-xl">
+            <HelpCircle className="w-6 h-6 shrink-0" />
+            <div className="text-sm font-medium">
+              Cortex Extension not detected. Privacy settings require the extension to be active.
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-4xl mx-auto px-6 lg:px-12 py-16">
         {/* Header */}
@@ -151,7 +228,7 @@ export default function Privacy() {
                 </p>
               </div>
               <button
-                onClick={() => setCaptureActive(!captureActive)}
+                onClick={handleToggleCapture}
                 className={`relative w-14 h-7 rounded-full transition-colors ${
                   captureActive ? "bg-primary" : "bg-slate-200 dark:bg-slate-700"
                 }`}
@@ -172,15 +249,15 @@ export default function Privacy() {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Today's Activity</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Saved</p>
                 <p className="font-bold text-slate-900 dark:text-white">
-                  {Math.floor(Math.random() * 30)} Pages
+                  {pageCount} Pages
                 </p>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Memory</p>
                 <p className="font-bold text-slate-900 dark:text-white">
-                  {formatStorageSize(Math.floor(Math.random() * 5242880))}
+                  {formatStorageSize(storageSize)}
                 </p>
               </div>
             </div>
@@ -307,13 +384,16 @@ export default function Privacy() {
                 Download a copy of everything Cortex has saved for you in a standard JSON format.
               </p>
             </div>
-            <button className="w-full py-4 bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-90 transition-all shadow-sm">
+            <button 
+              onClick={handleExport}
+              className="w-full py-4 bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-90 transition-all shadow-sm"
+            >
               Download Backup
             </button>
           </div>
 
           <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-100 dark:border-red-800 w-fit text-red-600">
+            <div className="p-3 bg-red-50 dark:bg-blue-900/20 rounded-xl border border-red-100 dark:border-red-800 w-fit text-red-600">
               <Trash2 className="w-6 h-6" />
             </div>
             <div>
@@ -322,7 +402,10 @@ export default function Privacy() {
                 Permanently erase all saved pages and activity history from this computer.
               </p>
             </div>
-            <button className="w-full py-4 bg-white dark:bg-slate-800 text-red-600 border border-red-100 dark:border-red-900/30 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-50 transition-all">
+            <button 
+              onClick={handleClearAll}
+              className="w-full py-4 bg-white dark:bg-slate-800 text-red-600 border border-red-100 dark:border-red-900/30 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-50 transition-all"
+            >
               Clear All Data
             </button>
           </div>

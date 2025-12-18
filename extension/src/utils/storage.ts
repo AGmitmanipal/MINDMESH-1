@@ -3,7 +3,8 @@
  * Production-ready storage with proper schema, migrations, and optimizations
  */
 
-import type { MemoryNode, Embedding, MemoryCluster, SemanticMatch } from "@shared/extension-types";
+import type { MemoryNode, Embedding, MemoryCluster, SemanticMatch, PrivacyRule, CaptureSettings } from "@shared/extension-types";
+import { cosineSimilarity, ANNIndex } from "./vector-search";
 
 const DB_NAME = "cortex-memory";
 const DB_VERSION = 2; // Increment for schema changes
@@ -16,11 +17,14 @@ const STORES = {
   SESSIONS: "sessions",
   ACTIVITY: "activity",
   SETTINGS: "settings",
+  RULES: "rules",
 } as const;
 
 export class CortexStorage {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<IDBDatabase>;
+  private annIndex: ANNIndex = new ANNIndex();
+  private isHydrated: boolean = false;
 
   constructor() {
     this.initPromise = this.init();
@@ -35,6 +39,7 @@ export class CortexStorage {
       };
 
       request.onupgradeneeded = (event) => {
+        // ... store definitions remain same ...
         const db = (event.target as IDBOpenDBRequest).result;
 
         // Pages store - main memory nodes
@@ -83,12 +88,59 @@ export class CortexStorage {
         if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
           db.createObjectStore(STORES.SETTINGS, { keyPath: "key" });
         }
+
+        // Privacy rules
+        if (!db.objectStoreNames.contains(STORES.RULES)) {
+          db.createObjectStore(STORES.RULES, { keyPath: "id" });
+        }
       };
 
       request.onsuccess = () => {
         this.db = request.result;
+        // Start hydration in background, don't await here to avoid deadlock
+        this.hydrateIndex().catch(console.error);
         resolve(this.db);
       };
+    });
+  }
+
+  private async hydrateIndex(): Promise<void> {
+    if (this.isHydrated) return;
+    try {
+      // Use internal method that doesn't call ready()
+      const embeddings = await this.internalGetAllEmbeddings();
+      embeddings.forEach(({ nodeId, embedding }) => {
+        this.annIndex.add(nodeId, embedding.vector);
+      });
+      this.isHydrated = true;
+      console.log(`CortexStorage: Index hydrated with ${embeddings.length} nodes`);
+    } catch (e) {
+      console.error("CortexStorage: Index hydration failed", e);
+    }
+  }
+
+  // Internal helper to bypass ready() check during hydration
+  private async internalGetAllEmbeddings(): Promise<Array<{ nodeId: string; embedding: Embedding }>> {
+    if (!this.db) throw new Error("DB not initialized");
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.EMBEDDINGS], "readonly");
+      const store = transaction.objectStore(STORES.EMBEDDINGS);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const results = request.result;
+        resolve(
+          results.map((r: any) => ({
+            nodeId: r.nodeId,
+            embedding: {
+              vector: r.vector,
+              model: r.model,
+              timestamp: r.timestamp,
+            },
+          }))
+        );
+      };
+      request.onerror = () => reject(new Error("Failed to get embeddings"));
     });
   }
 
@@ -127,14 +179,42 @@ export class CortexStorage {
       const transaction = this.db!.transaction([STORES.PAGES], "readonly");
       const store = transaction.objectStore(STORES.PAGES);
       const index = store.index("timestamp");
-      const request = index.getAll();
-
-      request.onsuccess = () => {
-        const results = request.result as MemoryNode[];
-        const sorted = results.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(limit ? sorted.slice(0, limit) : sorted);
-      };
-      request.onerror = () => reject(new Error("Failed to get memory nodes"));
+      
+      // Use openCursor for better performance with limits
+      const request = limit 
+        ? index.openCursor(null, "prev") // Descending order
+        : index.getAll();
+      
+      if (limit) {
+        const results: MemoryNode[] = [];
+        let count = 0;
+        
+        request.onsuccess = (event) => {
+          const cursor = (event.target as IDBRequest).result;
+          if (cursor && count < limit) {
+            results.push(cursor.value);
+            count++;
+            cursor.continue();
+          } else {
+            resolve(results);
+          }
+        };
+        
+        request.onerror = () => reject(new Error("Failed to get memory nodes"));
+      } else {
+        // Even without limit, use cursor to avoid massive memory spike with getAll()
+        const results: MemoryNode[] = [];
+        request.onsuccess = (event) => {
+          const cursor = (event.target as IDBRequest).result;
+          if (cursor) {
+            results.push(cursor.value);
+            cursor.continue();
+          } else {
+            resolve(results);
+          }
+        };
+        request.onerror = () => reject(new Error("Failed to get memory nodes"));
+      }
     });
   }
 
@@ -145,10 +225,10 @@ export class CortexStorage {
 
     const scored = allNodes
       .map((node) => {
-        const searchText = `${node.title} ${node.readableText} ${node.keywords.join(" ")}`.toLowerCase();
+        const searchText = (node.title || "") + " " + (node.readableText || "") + " " + (node.keywords?.join(" ") || "");
         let score = 0;
         queryTerms.forEach((term) => {
-          if (searchText.includes(term)) {
+          if (searchText.toLowerCase().includes(term)) {
             score += 1;
           }
         });
@@ -163,6 +243,9 @@ export class CortexStorage {
 
   async deleteMemoryNode(id: string): Promise<void> {
     await this.ready();
+    // Remove from ANN index
+    this.annIndex.remove(id);
+    
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([STORES.PAGES, STORES.EMBEDDINGS], "readwrite");
       const pageStore = transaction.objectStore(STORES.PAGES);
@@ -179,6 +262,9 @@ export class CortexStorage {
   // Embedding Operations
   async storeEmbedding(nodeId: string, embedding: Embedding): Promise<void> {
     await this.ready();
+    // Update ANN index
+    this.annIndex.add(nodeId, embedding.vector);
+    
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([STORES.EMBEDDINGS], "readwrite");
       const store = transaction.objectStore(STORES.EMBEDDINGS);
@@ -240,29 +326,33 @@ export class CortexStorage {
   async vectorSearch(
     queryVector: number[],
     limit: number = 10,
-    threshold: number = 0.5
+    threshold: number = 0.4
   ): Promise<SemanticMatch[]> {
-    const allEmbeddings = await this.getAllEmbeddings();
-    const matches: SemanticMatch[] = [];
-
-    for (const { nodeId, embedding } of allEmbeddings) {
-      const similarity = cosineSimilarity(queryVector, embedding.vector);
-      if (similarity >= threshold) {
-        const node = await this.getMemoryNode(nodeId);
-        if (node) {
-          matches.push({
-            nodeId,
-            similarity,
-            node,
-            reason: {
-              sharedKeywords: [],
-              contextMatch: "",
-              semanticSimilarity: similarity,
-            },
-          });
-        }
-      }
-    }
+    await this.ready();
+    
+    // Use ANN index for fast retrieval
+    const candidateMatches = this.annIndex.search(queryVector, limit * 2, threshold);
+    
+    // Fetch nodes in parallel for speed
+    const nodePromises = candidateMatches.map(({ nodeId }) => this.getMemoryNode(nodeId));
+    const nodes = await Promise.all(nodePromises);
+    
+    const matches: SemanticMatch[] = candidateMatches
+      .map(({ nodeId, similarity }, index) => {
+        const node = nodes[index];
+        if (!node) return null;
+        return {
+          nodeId,
+          similarity,
+          node,
+          reason: {
+            sharedKeywords: [],
+            contextMatch: "",
+            semanticSimilarity: similarity,
+          },
+        };
+      })
+      .filter((match): match is SemanticMatch => match !== null);
 
     return matches
       .sort((a, b) => b.similarity - a.similarity)
@@ -297,7 +387,7 @@ export class CortexStorage {
   // Graph Operations
   async addGraphEdge(fromNode: string, toNode: string, strength: number): Promise<void> {
     await this.ready();
-    const edgeId = `${fromNode}:${toNode}`;
+    const edgeId = fromNode + ":" + toNode;
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([STORES.GRAPH_EDGES], "readwrite");
       const store = transaction.objectStore(STORES.GRAPH_EDGES);
@@ -335,6 +425,47 @@ export class CortexStorage {
     });
   }
 
+  // Settings Operations
+  async updateSettings(settings: Partial<CaptureSettings>): Promise<void> {
+    await this.ready();
+    return new Promise(async (resolve, reject) => {
+      const current = await this.getSettings();
+      const updated = { ...current, ...settings };
+      
+      const transaction = this.db!.transaction([STORES.SETTINGS], "readwrite");
+      const store = transaction.objectStore(STORES.SETTINGS);
+      const request = store.put({ key: "capture", ...updated });
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error("Failed to update settings"));
+    });
+  }
+
+  async getSettings(): Promise<CaptureSettings> {
+    await this.ready();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.SETTINGS], "readonly");
+      const store = transaction.objectStore(STORES.SETTINGS);
+      const request = store.get("capture");
+
+      request.onsuccess = () => {
+        const defaultSettings: CaptureSettings = {
+          enabled: true,
+          excludeDomains: [],
+          excludeKeywords: [],
+          maxStorageSize: 500 * 1024 * 1024, // 500MB
+        };
+        resolve(request.result ? {
+          enabled: request.result.enabled,
+          excludeDomains: request.result.excludeDomains,
+          excludeKeywords: request.result.excludeKeywords,
+          maxStorageSize: request.result.maxStorageSize,
+        } : defaultSettings);
+      };
+      request.onerror = () => reject(new Error("Failed to get settings"));
+    });
+  }
+
   // Statistics
   async getStats(): Promise<{
     pageCount: number;
@@ -343,6 +474,8 @@ export class CortexStorage {
     storageSize: number;
   }> {
     await this.ready();
+    
+    // Execute all counts in parallel for speed
     const [pageCount, clusterCount, edgeCount] = await Promise.all([
       new Promise<number>((resolve, reject) => {
         const transaction = this.db!.transaction([STORES.PAGES], "readonly");
@@ -367,13 +500,14 @@ export class CortexStorage {
       }),
     ]);
 
+    // Get storage size estimate (non-blocking)
     let storageSize = 0;
-    if (navigator.storage?.estimate) {
+    if (navigator.storage && navigator.storage.estimate) {
       try {
         const estimate = await navigator.storage.estimate();
         storageSize = estimate.usage || 0;
-      } catch {
-        // Ignore
+      } catch (e) {
+        // Ignore storage estimate errors
       }
     }
 
@@ -383,49 +517,111 @@ export class CortexStorage {
   // Cleanup operations
   async deleteByDomain(domain: string): Promise<number> {
     await this.ready();
-    const allNodes = await this.getAllMemoryNodes();
-    const toDelete = allNodes.filter((n) => n.metadata.domain === domain);
-    
-    for (const node of toDelete) {
-      await this.deleteMemoryNode(node.id);
-    }
-    
-    return toDelete.length;
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.PAGES, STORES.EMBEDDINGS], "readwrite");
+      const pageStore = transaction.objectStore(STORES.PAGES);
+      const embeddingStore = transaction.objectStore(STORES.EMBEDDINGS);
+      const index = pageStore.index("domain");
+      const request = index.openCursor(IDBKeyRange.only(domain));
+      
+      let count = 0;
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest).result;
+        if (cursor) {
+          const id = cursor.value.id;
+          pageStore.delete(id);
+          embeddingStore.delete(id);
+          this.annIndex.remove(id);
+          count++;
+          cursor.continue();
+        } else {
+          resolve(count);
+        }
+      };
+      request.onerror = () => reject(new Error("Failed to delete by domain"));
+    });
   }
 
   async deleteByDateRange(startDate: number, endDate: number): Promise<number> {
     await this.ready();
-    const allNodes = await this.getAllMemoryNodes();
-    const toDelete = allNodes.filter(
-      (n) => n.timestamp >= startDate && n.timestamp <= endDate
-    );
-    
-    for (const node of toDelete) {
-      await this.deleteMemoryNode(node.id);
-    }
-    
-    return toDelete.length;
-  }
-}
-
-// Utility: Cosine similarity
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length) return 0;
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.PAGES, STORES.EMBEDDINGS], "readwrite");
+      const pageStore = transaction.objectStore(STORES.PAGES);
+      const embeddingStore = transaction.objectStore(STORES.EMBEDDINGS);
+      const index = pageStore.index("timestamp");
+      const request = index.openCursor(IDBKeyRange.bound(startDate, endDate));
+      
+      let count = 0;
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest).result;
+        if (cursor) {
+          const id = cursor.value.id;
+          pageStore.delete(id);
+          embeddingStore.delete(id);
+          this.annIndex.remove(id);
+          count++;
+          cursor.continue();
+        } else {
+          resolve(count);
+        }
+      };
+      request.onerror = () => reject(new Error("Failed to delete by date range"));
+    });
   }
 
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  async clearAllData(): Promise<void> {
+    await this.ready();
+    // Clear ANN index
+    this.annIndex.clear();
+    
+    return new Promise((resolve, reject) => {
+      const storeNames = Object.values(STORES);
+      const transaction = this.db!.transaction(storeNames, "readwrite");
+      for (const storeName of storeNames) {
+        transaction.objectStore(storeName as any).clear();
+      }
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new Error("Failed to clear all data"));
+    });
+  }
+
+  // Privacy Rule Operations
+  async addPrivacyRule(rule: PrivacyRule): Promise<void> {
+    await this.ready();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.RULES], "readwrite");
+      const store = transaction.objectStore(STORES.RULES);
+      const request = store.put(rule);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error("Failed to add privacy rule"));
+    });
+  }
+
+  async getPrivacyRules(): Promise<PrivacyRule[]> {
+    await this.ready();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.RULES], "readonly");
+      const store = transaction.objectStore(STORES.RULES);
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(new Error("Failed to get privacy rules"));
+    });
+  }
+
+  async deletePrivacyRule(id: string): Promise<void> {
+    await this.ready();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.RULES], "readwrite");
+      const store = transaction.objectStore(STORES.RULES);
+      const request = store.delete(id);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error("Failed to delete privacy rule"));
+    });
+  }
 }
 
 // Singleton instance
 export const cortexStorage = new CortexStorage();
-

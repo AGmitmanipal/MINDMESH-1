@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Shield, ShieldAlert, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
+import { useExtension } from "@/hooks/useExtension";
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { isAvailable, isChecking } = useExtension();
 
   return (
     <header className="sticky top-0 z-[100] w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
@@ -25,6 +27,19 @@ export default function Header() {
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-8">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              {isChecking ? (
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              ) : isAvailable ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+              )}
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {isChecking ? "Checking..." : isAvailable ? "Connected" : "Disconnected"}
+              </span>
+            </div>
+            
             <Link
               to="/"
               className="text-sm font-semibold text-slate-500 hover:text-primary transition-all"
@@ -44,9 +59,12 @@ export default function Header() {
               Privacy
             </Link>
             <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-2" />
-            <button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-all shadow-sm">
+            <Link 
+              to="/dashboard"
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-all shadow-sm"
+            >
               Get Started
-            </button>
+            </Link>
           </nav>
 
           {/* Mobile Menu Button */}

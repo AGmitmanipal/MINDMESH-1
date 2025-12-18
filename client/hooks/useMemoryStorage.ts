@@ -1,14 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
-import type { MemoryNode, SemanticMatch, PrivacyRule } from "@shared/extension-types";
+import type { MemoryNode, PrivacyRule } from "@shared/extension-types";
 
 const DB_NAME = "cortex-memory";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Matched with extension version
+
 const STORES = {
   PAGES: "pages",
-  CLUSTERS: "clusters",
-  RULES: "rules",
   EMBEDDINGS: "embeddings",
-};
+  CLUSTERS: "clusters",
+  GRAPH_EDGES: "graph_edges",
+  SESSIONS: "sessions",
+  ACTIVITY: "activity",
+  SETTINGS: "settings",
+  RULES: "rules",
+} as const;
 
 interface UseMemoryStorageReturn {
   isReady: boolean;
@@ -45,22 +50,49 @@ export function useMemoryStorage(): UseMemoryStorageReturn {
         request.onupgradeneeded = (event) => {
           const database = (event.target as IDBOpenDBRequest).result;
 
-          // Create object stores if they don't exist
+          // Pages store - main memory nodes
           if (!database.objectStoreNames.contains(STORES.PAGES)) {
-            const pageStore = database.createObjectStore(STORES.PAGES, {
-              keyPath: "id",
-            });
-            pageStore.createIndex("url", "url", { unique: true });
-            pageStore.createIndex("domain", "metadata.domain");
-            pageStore.createIndex("timestamp", "timestamp");
+            const pageStore = database.createObjectStore(STORES.PAGES, { keyPath: "id" });
+            pageStore.createIndex("url", "url", { unique: false });
+            pageStore.createIndex("domain", "metadata.domain", { unique: false });
+            pageStore.createIndex("timestamp", "timestamp", { unique: false });
+            pageStore.createIndex("sessionId", "metadata.sessionId", { unique: false });
           }
 
-          if (!database.objectStoreNames.contains(STORES.RULES)) {
-            database.createObjectStore(STORES.RULES, { keyPath: "id" });
-          }
-
+          // Embeddings store
           if (!database.objectStoreNames.contains(STORES.EMBEDDINGS)) {
             database.createObjectStore(STORES.EMBEDDINGS, { keyPath: "nodeId" });
+          }
+
+          // Clusters store
+          if (!database.objectStoreNames.contains(STORES.CLUSTERS)) {
+            database.createObjectStore(STORES.CLUSTERS, { keyPath: "id" });
+          }
+
+          // Graph edges
+          if (!database.objectStoreNames.contains(STORES.GRAPH_EDGES)) {
+            const edgeStore = database.createObjectStore(STORES.GRAPH_EDGES, { keyPath: "id" });
+            edgeStore.createIndex("fromNode", "fromNode", { unique: false });
+          }
+
+          // Sessions
+          if (!database.objectStoreNames.contains(STORES.SESSIONS)) {
+            database.createObjectStore(STORES.SESSIONS, { keyPath: "id" });
+          }
+
+          // Activity
+          if (!database.objectStoreNames.contains(STORES.ACTIVITY)) {
+            database.createObjectStore(STORES.ACTIVITY, { keyPath: "id" });
+          }
+
+          // Settings
+          if (!database.objectStoreNames.contains(STORES.SETTINGS)) {
+            database.createObjectStore(STORES.SETTINGS, { keyPath: "key" });
+          }
+
+          // Rules
+          if (!database.objectStoreNames.contains(STORES.RULES)) {
+            database.createObjectStore(STORES.RULES, { keyPath: "id" });
           }
         };
 
@@ -92,7 +124,7 @@ export function useMemoryStorage(): UseMemoryStorageReturn {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction([STORES.PAGES], "readwrite");
         const store = transaction.objectStore(STORES.PAGES);
-        const request = store.add(page);
+        const request = store.put(page); // Use put instead of add to handle updates
 
         request.onsuccess = () => {
           resolve(request.result as string);
@@ -115,7 +147,9 @@ export function useMemoryStorage(): UseMemoryStorageReturn {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        resolve(request.result as MemoryNode[]);
+        const results = request.result as MemoryNode[];
+        // Sort by timestamp descending
+        resolve(results.sort((a, b) => b.timestamp - a.timestamp));
       };
 
       request.onerror = () => {
@@ -130,8 +164,10 @@ export function useMemoryStorage(): UseMemoryStorageReturn {
 
       const allPages = await getAllPages();
 
-      // Simple text-based search - in production would use vector similarity
-      const queryTerms = query.toLowerCase().split(" ");
+      if (!query.trim()) return allPages.slice(0, limit);
+
+      // Simple text-based search
+      const queryTerms = query.toLowerCase().split(/\s+/);
       const scored = allPages
         .map((page) => {
           let score = 0;
@@ -281,7 +317,7 @@ export function useMemoryStorage(): UseMemoryStorageReturn {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction([STORES.RULES], "readwrite");
         const store = transaction.objectStore(STORES.RULES);
-        const request = store.add(rule);
+        const request = store.put(rule);
 
         request.onsuccess = () => {
           resolve(request.result as string);

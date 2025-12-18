@@ -52,6 +52,116 @@ export class BruteForceIndex implements VectorIndex {
 }
 
 /**
+ * Approximate Nearest Neighbors Index using Random Projection Hashing
+ * Faster than brute force for large datasets
+ */
+export class ANNIndex implements VectorIndex {
+  private vectors: Map<string, number[]> = new Map();
+  private hashes: Map<string, number> = new Map();
+  private buckets: Map<number, string[]> = new Map();
+  private projectionMatrix: number[][] = [];
+  private numHashes = 16;
+  private dim = 384;
+
+  constructor() {
+    // Generate fixed random projection matrix
+    for (let i = 0; i < this.numHashes; i++) {
+      const row = [];
+      for (let j = 0; j < this.dim; j++) {
+        row.push(Math.random() * 2 - 1);
+      }
+      this.projectionMatrix.push(row);
+    }
+  }
+
+  private computeHash(vector: number[]): number {
+    let hash = 0;
+    for (let i = 0; i < this.numHashes; i++) {
+      let dot = 0;
+      for (let j = 0; j < this.dim; j++) {
+        dot += vector[j] * this.projectionMatrix[i][j];
+      }
+      if (dot > 0) {
+        hash |= (1 << i);
+      }
+    }
+    return hash;
+  }
+
+  add(nodeId: string, vector: number[]): void {
+    this.vectors.set(nodeId, vector);
+    const hash = this.computeHash(vector);
+    this.hashes.set(nodeId, hash);
+    
+    if (!this.buckets.has(hash)) {
+      this.buckets.set(hash, []);
+    }
+    this.buckets.get(hash)!.push(nodeId);
+  }
+
+  search(
+    queryVector: number[],
+    k: number = 10,
+    threshold: number = 0.4
+  ): Array<{ nodeId: string; similarity: number }> {
+    const queryHash = this.computeHash(queryVector);
+    const candidates = new Set<string>();
+    
+    // Search in the same bucket and similar buckets (1-bit flip)
+    const searchHashes = [queryHash];
+    for (let i = 0; i < this.numHashes; i++) {
+      searchHashes.push(queryHash ^ (1 << i));
+    }
+
+    for (const h of searchHashes) {
+      const bucket = this.buckets.get(h);
+      if (bucket) {
+        bucket.forEach(id => candidates.add(id));
+      }
+    }
+
+    // If too few candidates, fall back to brute force over a larger subset or all
+    if (candidates.size < k) {
+      for (const nodeId of this.vectors.keys()) {
+        candidates.add(nodeId);
+        if (candidates.size > 100) break; // Limit fallback
+      }
+    }
+
+    const results: Array<{ nodeId: string; similarity: number }> = [];
+    for (const nodeId of candidates) {
+      const vector = this.vectors.get(nodeId)!;
+      const similarity = cosineSimilarity(queryVector, vector);
+      if (similarity >= threshold) {
+        results.push({ nodeId, similarity });
+      }
+    }
+
+    return results
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, k);
+  }
+
+  remove(nodeId: string): void {
+    const hash = this.hashes.get(nodeId);
+    if (hash !== undefined) {
+      const bucket = this.buckets.get(hash);
+      if (bucket) {
+        this.buckets.set(hash, bucket.filter(id => id !== nodeId));
+      }
+    }
+    this.hashes.delete(nodeId);
+    this.vectors.delete(nodeId);
+  }
+
+  clear(): void {
+    this.vectors.clear();
+    this.hashes.clear();
+    this.buckets.clear();
+  }
+}
+
+/**
  * Cosine similarity calculation
  */
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
