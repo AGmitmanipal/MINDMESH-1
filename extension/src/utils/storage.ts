@@ -326,12 +326,16 @@ export class CortexStorage {
   async vectorSearch(
     queryVector: number[],
     limit: number = 10,
-    threshold: number = 0.4
+    threshold: number = 0.15
   ): Promise<SemanticMatch[]> {
     await this.ready();
     
-    // Use ANN index for fast retrieval
-    const candidateMatches = this.annIndex.search(queryVector, limit * 2, threshold);
+    console.log(`CortexStorage.vectorSearch: Searching with limit=${limit}, threshold=${threshold}, index hydrated=${this.isHydrated}, index size=${this.annIndex.search(queryVector, 1, 0).length > 0 ? 'has vectors' : 'empty'}`);
+    
+    // Use ANN index for fast retrieval - search for more candidates to increase recall
+    const candidateMatches = this.annIndex.search(queryVector, limit * 3, threshold);
+    
+    console.log(`CortexStorage.vectorSearch: Found ${candidateMatches.length} candidates`);
     
     // Fetch nodes in parallel for speed
     const nodePromises = candidateMatches.map(({ nodeId }) => this.getMemoryNode(nodeId));
@@ -353,6 +357,8 @@ export class CortexStorage {
         };
       })
       .filter((match): match is SemanticMatch => match !== null);
+
+    console.log(`CortexStorage.vectorSearch: Returning ${matches.length} matches`);
 
     return matches
       .sort((a, b) => b.similarity - a.similarity)

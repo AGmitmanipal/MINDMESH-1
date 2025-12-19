@@ -13,6 +13,7 @@ export interface EmbeddingResult {
 /**
  * Enhanced fallback embedding generator
  * Creates deterministic, meaningful vectors based on text features
+ * Uses TF-IDF-inspired approach with word hashing for better semantic representation
  */
 export function generateEmbedding(
   text: string,
@@ -22,40 +23,61 @@ export function generateEmbedding(
   const DIM = 384; // Standard embedding dimension
   const vector: number[] = new Array(DIM).fill(0);
 
-  // Combine text sources for single pass processing
-  const textSample = text.slice(0, 1000).toLowerCase();
+  // Combine and clean text sources
+  const textSample = text.slice(0, 2000).toLowerCase();
   const titleLow = title.toLowerCase();
   const keywordsStr = keywords.join(" ").toLowerCase();
   
-  // Single pass to generate seed hashes
-  const hashString = (str: string, seed: number = 0) => {
-    let h = seed;
-    for (let i = 0; i < str.length; i++) {
-      h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  // Extract words and compute frequencies
+  const allText = `${titleLow} ${titleLow} ${titleLow} ${keywordsStr} ${keywordsStr} ${textSample}`;
+  const words = allText.match(/\b\w{3,}\b/g) || [];
+  const wordFreq = new Map<string, number>();
+  
+  words.forEach(word => {
+    wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+  });
+
+  // Hash function for consistent word->dimension mapping
+  const hashWord = (word: string, dim: number): number => {
+    let hash = 0;
+    for (let i = 0; i < word.length; i++) {
+      hash = ((hash << 5) - hash + word.charCodeAt(i)) | 0;
     }
-    return h;
+    return Math.abs(hash) % dim;
   };
 
-  // Generate a set of base hashes from different inputs
-  const baseHashes = [
-    hashString(titleLow, 123),
-    hashString(keywordsStr, 456),
-    hashString(textSample.slice(0, 500), 789),
-    hashString(textSample.slice(500, 1000), 321),
-    hashString(titleLow + keywordsStr, 654)
-  ];
-
-  // Derive the 384 dimensions from base hashes using a fast deterministic function
-  for (let i = 0; i < DIM; i++) {
-    const hashIdx = i % baseHashes.length;
-    const baseHash = baseHashes[hashIdx];
-    const mix = hashString(i.toString(), baseHash);
+  // Populate vector using word hashing (similar to feature hashing)
+  // Each word contributes to multiple dimensions for robustness
+  wordFreq.forEach((freq, word) => {
+    const weight = Math.log(1 + freq); // TF-like weighting
     
-    // Use trig functions for smooth distribution as before, but on pre-mixed values
-    vector[i] = Math.sin(mix / 1000) * 0.8 + Math.cos((mix ^ i) / 500) * 0.2;
-  }
+    // Map each word to 3 dimensions using different seeds
+    for (let seed = 0; seed < 3; seed++) {
+      const idx = hashWord(word + seed.toString(), DIM);
+      const sign = (hashWord(word, 2) === 0) ? 1 : -1;
+      vector[idx] += weight * sign;
+    }
+  });
 
-  // Normalize vector
+  // Add title and keyword boosting
+  keywords.forEach(keyword => {
+    const word = keyword.toLowerCase();
+    const idx = hashWord(word, DIM);
+    vector[idx] += 2.0; // Boost keywords
+  });
+
+  // Add character n-gram features for better matching
+  const trigrams = [];
+  for (let i = 0; i < titleLow.length - 2; i++) {
+    trigrams.push(titleLow.substring(i, i + 3));
+  }
+  
+  trigrams.slice(0, 20).forEach(trigram => {
+    const idx = hashWord(trigram, DIM);
+    vector[idx] += 0.5;
+  });
+
+  // Normalize vector to unit length
   const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
   if (norm > 0) {
     for (let i = 0; i < DIM; i++) {

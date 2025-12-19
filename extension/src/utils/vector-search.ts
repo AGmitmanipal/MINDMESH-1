@@ -26,7 +26,7 @@ export class BruteForceIndex implements VectorIndex {
   search(
     queryVector: number[],
     k: number = 10,
-    threshold: number = 0.5
+    threshold: number = 0.15
   ): Array<{ nodeId: string; similarity: number }> {
     const results: Array<{ nodeId: string; similarity: number }> = [];
 
@@ -36,6 +36,8 @@ export class BruteForceIndex implements VectorIndex {
         results.push({ nodeId, similarity });
       }
     }
+
+    console.log(`BruteForceIndex: Found ${results.length} results from ${this.vectors.size} vectors (threshold: ${threshold})`);
 
     return results
       .sort((a, b) => b.similarity - a.similarity)
@@ -102,7 +104,7 @@ export class ANNIndex implements VectorIndex {
   search(
     queryVector: number[],
     k: number = 10,
-    threshold: number = 0.4
+    threshold: number = 0.15
   ): Array<{ nodeId: string; similarity: number }> {
     const queryHash = this.computeHash(queryVector);
     const candidates = new Set<string>();
@@ -120,11 +122,27 @@ export class ANNIndex implements VectorIndex {
       }
     }
 
-    // If too few candidates, fall back to brute force over a larger subset or all
-    if (candidates.size < k) {
+    // If too few candidates, expand search to more buckets or all vectors
+    if (candidates.size < k * 2) {
+      // Try 2-bit flips
+      for (let i = 0; i < this.numHashes; i++) {
+        for (let j = i + 1; j < this.numHashes; j++) {
+          const hash = queryHash ^ (1 << i) ^ (1 << j);
+          const bucket = this.buckets.get(hash);
+          if (bucket) {
+            bucket.forEach(id => candidates.add(id));
+          }
+          if (candidates.size > k * 5) break;
+        }
+        if (candidates.size > k * 5) break;
+      }
+    }
+
+    // If still too few candidates, fall back to all vectors
+    if (candidates.size < k * 2) {
       for (const nodeId of this.vectors.keys()) {
         candidates.add(nodeId);
-        if (candidates.size > 100) break; // Limit fallback
+        if (candidates.size > 200) break; // Limit fallback
       }
     }
 
@@ -136,6 +154,8 @@ export class ANNIndex implements VectorIndex {
         results.push({ nodeId, similarity });
       }
     }
+
+    console.log(`ANNIndex: Found ${results.length} results from ${candidates.size} candidates (threshold: ${threshold})`);
 
     return results
       .sort((a, b) => b.similarity - a.similarity)

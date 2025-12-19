@@ -22,28 +22,44 @@ export class RecallService {
   async search(
     query: string,
     limit: number = 10,
-    threshold: number = 0.4
+    threshold: number = 0.15
   ): Promise<RecallResult> {
-    console.log(`RecallService: Searching for "${query}"`);
+    console.log(`RecallService: Searching for "${query}" with threshold ${threshold}`);
+    
+    // Extract keywords from query for better matching
+    const queryWords = query.toLowerCase().match(/\b\w{3,}\b/g) || [];
     
     // Generate query embedding
-    const queryEmbedding = generateEmbedding(query, query, []);
+    const queryEmbedding = generateEmbedding(query, query, queryWords);
+    console.log(`RecallService: Generated query embedding with ${queryEmbedding.vector.length} dimensions`);
     
-    // Perform vector search
+    // Perform vector search with lower threshold for better recall
     const matches = await cortexStorage.vectorSearch(queryEmbedding.vector, limit, threshold);
     
-    console.log(`RecallService: Found ${matches.length} semantic matches`);
+    console.log(`RecallService: Found ${matches.length} semantic matches (threshold: ${threshold})`);
 
-    // If no semantic matches, fall back to keyword search
-    if (matches.length === 0) {
-      console.log("RecallService: Falling back to keyword search");
-      const nodes = await cortexStorage.searchMemoryNodes(query, limit);
-      const fallbackMatches = nodes.map(node => createSemanticMatch(node, 0.3, query));
+    // If very few semantic matches, also try keyword search and merge results
+    if (matches.length < 3) {
+      console.log("RecallService: Augmenting with keyword search");
+      const keywordNodes = await cortexStorage.searchMemoryNodes(query, limit);
+      
+      // Merge results, avoiding duplicates
+      const existingIds = new Set(matches.map(m => m.nodeId));
+      const additionalMatches = keywordNodes
+        .filter(node => !existingIds.has(node.id))
+        .map(node => createSemanticMatch(node, 0.2, query));
+      
+      const allMatches = [...matches, ...additionalMatches]
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+      
+      console.log(`RecallService: Total matches after merge: ${allMatches.length}`);
+      
       return {
-        matches: fallbackMatches,
+        matches: allMatches,
         query,
         timestamp: Date.now(),
-        totalResults: fallbackMatches.length,
+        totalResults: allMatches.length,
       };
     }
 
