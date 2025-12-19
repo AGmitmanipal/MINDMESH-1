@@ -1,39 +1,68 @@
 /**
  * Vector Search Engine
- * Fast approximate nearest neighbor search for semantic similarity
+ * Deterministic, dimension-safe, cosine-correct
  */
 
-import type { Embedding, MemoryNode, SemanticMatch } from "@shared/extension-types";
+import type { MemoryNode, SemanticMatch } from "@shared/extension-types";
+
+/* =========================
+   Vector Index Interface
+========================= */
 
 export interface VectorIndex {
   add(nodeId: string, vector: number[]): void;
-  search(queryVector: number[], k: number, threshold?: number): Array<{ nodeId: string; similarity: number }>;
+  search(
+    queryVector: number[],
+    k?: number,
+    threshold?: number
+  ): Array<{ nodeId: string; similarity: number }>;
   remove(nodeId: string): void;
   clear(): void;
 }
 
-/**
- * Simple brute-force vector index
- * For production, consider HNSW or other ANN algorithms
- */
+/* =========================
+   Utilities
+========================= */
+
+export function normalizeVector(vector: number[]): number[] {
+  const norm = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
+  if (norm === 0) return vector.slice();
+  return vector.map(v => v / norm);
+}
+
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+}
+
+/* =========================
+   Brute Force Index
+========================= */
+
 export class BruteForceIndex implements VectorIndex {
-  private vectors: Map<string, number[]> = new Map();
+  private vectors = new Map<string, number[]>();
 
   add(nodeId: string, vector: number[]): void {
-    this.vectors.set(nodeId, vector);
+    this.vectors.set(nodeId, normalizeVector(vector));
   }
 
   search(
     queryVector: number[],
     k: number = 10,
     threshold: number = 0.5
-  ): Array<{ nodeId: string; similarity: number }> {
-    const results: Array<{ nodeId: string; similarity: number }> = [];
+  ) {
+    const query = normalizeVector(queryVector);
 
-    for (const [nodeId, vector] of this.vectors.entries()) {
-      const similarity = cosineSimilarity(queryVector, vector);
-      if (similarity >= threshold) {
-        results.push({ nodeId, similarity });
+    const results = [];
+    for (const [id, vec] of this.vectors) {
+      const sim = cosineSimilarity(query, vec);
+      if (sim >= threshold) {
+        results.push({ nodeId: id, similarity: sim });
       }
     }
 
@@ -51,89 +80,94 @@ export class BruteForceIndex implements VectorIndex {
   }
 }
 
-/**
- * Approximate Nearest Neighbors Index using Random Projection Hashing
- * Faster than brute force for large datasets
- */
-export class ANNIndex implements VectorIndex {
-  private vectors: Map<string, number[]> = new Map();
-  private hashes: Map<string, number> = new Map();
-  private buckets: Map<number, string[]> = new Map();
-  private projectionMatrix: number[][] = [];
-  private numHashes = 16;
-  private dim = 384;
+/* =========================
+   ANN Index (Random Projection)
+========================= */
 
-  constructor() {
-    // Generate fixed random projection matrix
+export interface ANNIndexOptions {
+  numHashes?: number;
+}
+
+export class ANNIndex implements VectorIndex {
+  private vectors = new Map<string, number[]>();
+  private hashes = new Map<string, number>();
+  private buckets = new Map<number, Set<string>>();
+  private projectionMatrix: number[][] = [];
+
+  private dim: number | null = null;
+  private numHashes: number;
+
+  constructor(options: ANNIndexOptions = {}) {
+    this.numHashes = options.numHashes ?? 16;
+  }
+
+  private initProjection(dim: number) {
+    if (this.dim !== null) return;
+
+    this.dim = dim;
     for (let i = 0; i < this.numHashes; i++) {
-      const row = [];
-      for (let j = 0; j < this.dim; j++) {
-        row.push(Math.random() * 2 - 1);
+      const row = new Array(dim);
+      for (let j = 0; j < dim; j++) {
+        row[j] = Math.sin(i * 73856093 + j * 19349663);
       }
       this.projectionMatrix.push(row);
     }
   }
 
-  private computeHash(vector: number[]): number {
+  private hash(vector: number[]): number {
+    if (this.dim === null) this.initProjection(vector.length);
+    if (vector.length !== this.dim) {
+      throw new Error(`Vector dimension mismatch: expected ${this.dim}, got ${vector.length}`);
+    }
+
     let hash = 0;
     for (let i = 0; i < this.numHashes; i++) {
       let dot = 0;
       for (let j = 0; j < this.dim; j++) {
         dot += vector[j] * this.projectionMatrix[i][j];
       }
-      if (dot > 0) {
-        hash |= (1 << i);
-      }
+      if (dot > 0) hash |= 1 << i;
     }
     return hash;
   }
 
   add(nodeId: string, vector: number[]): void {
-    this.vectors.set(nodeId, vector);
-    const hash = this.computeHash(vector);
-    this.hashes.set(nodeId, hash);
-    
-    if (!this.buckets.has(hash)) {
-      this.buckets.set(hash, []);
-    }
-    this.buckets.get(hash)!.push(nodeId);
+    const v = normalizeVector(vector);
+    const h = this.hash(v);
+
+    this.vectors.set(nodeId, v);
+    this.hashes.set(nodeId, h);
+
+    if (!this.buckets.has(h)) this.buckets.set(h, new Set());
+    this.buckets.get(h)!.add(nodeId);
   }
 
   search(
     queryVector: number[],
     k: number = 10,
     threshold: number = 0.4
-  ): Array<{ nodeId: string; similarity: number }> {
-    const queryHash = this.computeHash(queryVector);
+  ) {
+    const query = normalizeVector(queryVector);
+    const qh = this.hash(query);
+
     const candidates = new Set<string>();
-    
-    // Search in the same bucket and similar buckets (1-bit flip)
-    const searchHashes = [queryHash];
-    for (let i = 0; i < this.numHashes; i++) {
-      searchHashes.push(queryHash ^ (1 << i));
+
+    // Same bucket + 1-bit flips
+    for (let i = -1; i < this.numHashes; i++) {
+      const h = i === -1 ? qh : qh ^ (1 << i);
+      this.buckets.get(h)?.forEach(id => candidates.add(id));
     }
 
-    for (const h of searchHashes) {
-      const bucket = this.buckets.get(h);
-      if (bucket) {
-        bucket.forEach(id => candidates.add(id));
-      }
-    }
-
-    // If too few candidates, fall back to brute force over a larger subset or all
+    // Full fallback if recall is low
     if (candidates.size < k) {
-      for (const nodeId of this.vectors.keys()) {
-        candidates.add(nodeId);
-        if (candidates.size > 100) break; // Limit fallback
-      }
+      this.vectors.forEach((_, id) => candidates.add(id));
     }
 
-    const results: Array<{ nodeId: string; similarity: number }> = [];
-    for (const nodeId of candidates) {
-      const vector = this.vectors.get(nodeId)!;
-      const similarity = cosineSimilarity(queryVector, vector);
-      if (similarity >= threshold) {
-        results.push({ nodeId, similarity });
+    const results = [];
+    for (const id of candidates) {
+      const sim = cosineSimilarity(query, this.vectors.get(id)!);
+      if (sim >= threshold) {
+        results.push({ nodeId: id, similarity: sim });
       }
     }
 
@@ -143,13 +177,9 @@ export class ANNIndex implements VectorIndex {
   }
 
   remove(nodeId: string): void {
-    const hash = this.hashes.get(nodeId);
-    if (hash !== undefined) {
-      const bucket = this.buckets.get(hash);
-      if (bucket) {
-        this.buckets.set(hash, bucket.filter(id => id !== nodeId));
-      }
-    }
+    const h = this.hashes.get(nodeId);
+    if (h !== undefined) this.buckets.get(h)?.delete(nodeId);
+
     this.hashes.delete(nodeId);
     this.vectors.delete(nodeId);
   }
@@ -158,44 +188,15 @@ export class ANNIndex implements VectorIndex {
     this.vectors.clear();
     this.hashes.clear();
     this.buckets.clear();
+    this.projectionMatrix = [];
+    this.dim = null;
   }
 }
 
-/**
- * Cosine similarity calculation
- */
-export function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length) {
-    console.warn("Vector length mismatch:", vecA.length, vecB.length);
-    return 0;
-  }
+/* =========================
+   Semantic Matching Helpers
+========================= */
 
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-/**
- * Normalize vector to unit length
- */
-export function normalizeVector(vector: number[]): number[] {
-  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-  if (norm === 0) return vector;
-  return vector.map((val) => val / norm);
-}
-
-/**
- * Find shared keywords between query and node
- */
 export function findSharedKeywords(
   queryText: string,
   node: MemoryNode
@@ -204,54 +205,38 @@ export function findSharedKeywords(
     queryText
       .toLowerCase()
       .split(/\s+/)
-      .filter((w) => w.length > 3)
+      .filter(w => w.length > 3)
   );
 
-  return node.keywords.filter((kw) => queryWords.has(kw.toLowerCase()));
+  return node.keywords.filter(kw =>
+    queryWords.has(kw.toLowerCase())
+  );
 }
 
-/**
- * Enhanced semantic match with explainability
- */
+function generateContextMatch(
+  queryText: string,
+  node: MemoryNode
+): string {
+  const q = queryText.toLowerCase();
+  if (node.title.toLowerCase().includes(q)) return "Title match";
+  if (node.readableText.toLowerCase().includes(q)) return "Content match";
+  if (node.keywords.some(k => q.includes(k.toLowerCase()))) return "Keyword match";
+  return "Semantic similarity";
+}
+
 export function createSemanticMatch(
   node: MemoryNode,
   similarity: number,
   queryText: string
 ): SemanticMatch {
-  const sharedKeywords = findSharedKeywords(queryText, node);
-  
-  // Generate context match explanation
-  const contextMatch = generateContextMatch(queryText, node);
-
   return {
     nodeId: node.id,
     similarity,
     node,
     reason: {
-      sharedKeywords,
-      contextMatch,
       semanticSimilarity: similarity,
+      sharedKeywords: findSharedKeywords(queryText, node),
+      contextMatch: generateContextMatch(queryText, node),
     },
   };
 }
-
-function generateContextMatch(queryText: string, node: MemoryNode): string {
-  const queryLower = queryText.toLowerCase();
-  const titleLower = node.title.toLowerCase();
-  const textLower = node.readableText.toLowerCase().slice(0, 500);
-
-  if (titleLower.includes(queryLower)) {
-    return "Title contains query terms";
-  }
-
-  if (textLower.includes(queryLower)) {
-    return "Content contains query terms";
-  }
-
-  if (node.keywords.some((kw) => queryLower.includes(kw.toLowerCase()))) {
-    return "Shared keywords match";
-  }
-
-  return "Semantic similarity match";
-}
-
