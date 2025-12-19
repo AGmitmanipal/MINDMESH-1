@@ -116,8 +116,8 @@ export function extractKeywords(
 
   // Tokenize and filter
   const words = [
-    ...text.toLowerCase().match(/\b\w+\b/g),
-    ...title.toLowerCase().match(/\b\w+\b/g),
+    ...(text.toLowerCase().match(/\b\w+\b/g) || []),
+    ...(title.toLowerCase().match(/\b\w+\b/g) || []),
   ].filter(
     (word) =>
       word.length > 3 &&
