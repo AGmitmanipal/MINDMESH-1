@@ -81,6 +81,18 @@ export type ExtensionMessage =
       payload?: Record<string, never>;
     }
   | {
+      /**
+       * Force-load the built-in seed memories (used for demos).
+       * This is safe to call multiple times (seed IDs are upserted).
+       */
+      type: "SEED_MEMORIES";
+      payload?: { force?: boolean };
+    }
+  | {
+      type: "GET_ANALYTICS";
+      payload: Record<string, never>;
+    }
+  | {
       type: "PAGE_CAPTURED";
       payload: PageContext;
     }
@@ -155,4 +167,5 @@ export type ExtensionMessage =
           data: Record<string, unknown>;
         };
       };
-    };
+    }
+  ;

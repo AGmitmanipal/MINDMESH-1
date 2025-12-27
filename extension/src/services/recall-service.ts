@@ -5,7 +5,7 @@
 
 import type { MemoryNode, SemanticMatch } from "@shared/extension-types";
 import { cortexStorage } from "../utils/storage";
-import { createSemanticMatch } from "../utils/vector-search";
+import { createSemanticMatch, calculateHybridScore } from "../utils/vector-search";
 import { generateEmbedding } from "../utils/embedding";
 
 export interface RecallResult {
@@ -17,42 +17,83 @@ export interface RecallResult {
 
 export class RecallService {
   /**
-   * Search memory by semantic similarity
+   * Hybrid search: semantic similarity + keyword + title/domain boosting
+   * Combines multiple search strategies for optimal relevance
    */
   async search(
     query: string,
     limit: number = 10,
-    threshold: number = 0.4
+    threshold: number = 0.3  // Lower threshold to get more results
   ): Promise<RecallResult> {
-    console.log(`RecallService: Searching for "${query}"`);
-    
-    // Generate query embedding
-    const queryEmbedding = generateEmbedding(query, query, []);
-    
-    // Perform vector search
-    const matches = await cortexStorage.vectorSearch(queryEmbedding.vector, limit, threshold);
-    
-    console.log(`RecallService: Found ${matches.length} semantic matches`);
+    try {
+      console.log(`RecallService: Hybrid search for "${query}", limit: ${limit}, threshold: ${threshold}`);
+      
+      // 1. Generate query embedding for semantic search
+      console.log("RecallService: Generating query embedding...");
+      const queryEmbedding = generateEmbedding(query, query, []);
+      console.log("RecallService: Query embedding generated, dimension:", queryEmbedding.vector.length);
+      
+      // 2. Get semantic matches (get more candidates for boosting)
+      console.log("RecallService: Starting vector search...");
+      const semanticMatches = await cortexStorage.vectorSearch(queryEmbedding.vector, limit * 2, threshold);
+      console.log(`RecallService: Found ${semanticMatches.length} semantic matches`);
+      
+      // 3. Boost matches where title/domain contains query terms
+      const boostedMatches = semanticMatches.map(match => {
+        const hybridScore = calculateHybridScore(match.similarity, match.node, query);
+        return {
+          ...match,
+          similarity: hybridScore,
+        };
+      });
+      
+      // 4. Also perform keyword search for exact matches
+      console.log("RecallService: Starting keyword search...");
+      const keywordNodes = await cortexStorage.searchMemoryNodes(query, limit);
+      const keywordMatches = keywordNodes.map(node => {
+        // Calculate hybrid score for keyword matches too
+        const baseScore = 0.5; // Base score for keyword matches
+        const hybridScore = calculateHybridScore(baseScore, node, query);
+        return createSemanticMatch(node, hybridScore, query);
+      });
+      
+      console.log(`RecallService: Found ${keywordMatches.length} keyword matches`);
+      
+      // 5. Merge and deduplicate results
+      const allMatches = [...boostedMatches, ...keywordMatches];
+      const uniqueMatches = new Map<string, SemanticMatch>();
+      
+      allMatches.forEach(match => {
+        const existing = uniqueMatches.get(match.nodeId);
+        // Keep the match with higher similarity score
+        if (!existing || match.similarity > existing.similarity) {
+          uniqueMatches.set(match.nodeId, match);
+        }
+      });
+      
+      // 6. Sort by boosted similarity and return top results
+      const finalMatches = Array.from(uniqueMatches.values())
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+      
+      console.log(`RecallService: Returning ${finalMatches.length} merged results`);
 
-    // If no semantic matches, fall back to keyword search
-    if (matches.length === 0) {
-      console.log("RecallService: Falling back to keyword search");
-      const nodes = await cortexStorage.searchMemoryNodes(query, limit);
-      const fallbackMatches = nodes.map(node => createSemanticMatch(node, 0.3, query));
       return {
-        matches: fallbackMatches,
+        matches: finalMatches,
         query,
         timestamp: Date.now(),
-        totalResults: fallbackMatches.length,
+        totalResults: finalMatches.length,
+      };
+    } catch (error) {
+      console.error("RecallService: Search error:", error);
+      // Return empty results instead of throwing to prevent timeout
+      return {
+        matches: [],
+        query,
+        timestamp: Date.now(),
+        totalResults: 0,
       };
     }
-
-    return {
-      matches,
-      query,
-      timestamp: Date.now(),
-      totalResults: matches.length,
-    };
   }
 
   /**

@@ -54,42 +54,43 @@
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    /* Refined Slate Dark Theme - Warm, comfortable, professional */
+    --background: 215 15% 8%;
+    --foreground: 215 20% 95%;
 
-    --card: 222.2 84% 6.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 215 15% 12%;
+    --card-foreground: 215 20% 95%;
 
-    --popover: 222.2 84% 6.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 215 15% 12%;
+    --popover-foreground: 215 20% 95%;
 
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
+    --primary: 217 92% 60%;
+    --primary-foreground: 215 15% 8%;
 
     --secondary: 199 89% 48%;
-    --secondary-foreground: 222.2 84% 4.9%;
+    --secondary-foreground: 215 15% 8%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 215 15% 20%;
+    --muted-foreground: 215 20% 70%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 215 15% 20%;
+    --accent-foreground: 215 20% 95%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 215 20% 95%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --border: 215 15% 20%;
+    --input: 215 15% 20%;
+    --ring: 217 92% 60%;
 
-    --sidebar-background: 222.2 84% 5.9%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 240 4.9% 83.9%;
+    --sidebar-background: 215 15% 10%;
+    --sidebar-foreground: 215 20% 90%;
+    --sidebar-primary: 217 92% 60%;
+    --sidebar-primary-foreground: 215 15% 8%;
+    --sidebar-accent: 215 15% 18%;
+    --sidebar-accent-foreground: 215 20% 90%;
+    --sidebar-border: 215 15% 18%;
+    --sidebar-ring: 217 92% 60%;
   }
 }
 

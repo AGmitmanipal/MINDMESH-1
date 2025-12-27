@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import type { MemoryNode, ExtensionMessage } from "@shared/extension-types";
+import type {
+  MemoryNode,
+  ExtensionMessage,
+} from "@shared/extension-types";
+
+type AutomationAction = {
+  type: "open_tab" | "close_tab" | "navigate" | "fill_form" | "click" | "extract";
+  data: Record<string, unknown>;
+};
 
 export function useExtension() {
   const [isAvailable, setIsAvailable] = useState(false);
@@ -162,7 +170,9 @@ export function useExtension() {
     }
 
     return new Promise((resolve) => {
-      const timeoutMs = 10000; // Increased to 10 seconds
+      // Increase timeout for heavy operations (AI model loading, analytics)
+      const heavyOperations = ["SEARCH_MEMORY", "GET_ANALYTICS", "GET_ACTIVITY_INSIGHTS"];
+      const timeoutMs = heavyOperations.includes(message.type) ? 30000 : 10000; // 30s for heavy, 10s for normal
       const timeout = setTimeout(() => {
         console.error(`Cortex: Message ${message.type} timed out after ${timeoutMs/1000}s`);
         resolve({ success: false, error: "Request timed out" });
@@ -202,6 +212,13 @@ export function useExtension() {
     });
   }, [extensionId]);
 
+  const executeAction = useCallback(
+    async <T = unknown>(action: AutomationAction) => {
+      return await sendMessage<T>({ type: "EXECUTE_ACTION", payload: { action } } as ExtensionMessage);
+    },
+    [sendMessage]
+  );
+
   const getStats = useCallback(async () => {
     const response = await sendMessage<any>({ type: "GET_STATS", payload: {} });
     console.log("useExtension: getStats response:", response);
@@ -209,6 +226,21 @@ export function useExtension() {
       return response.data;
     }
     return { pageCount: 0, storageSize: 0 };
+  }, [sendMessage]);
+
+  const getAnalytics = useCallback(async () => {
+    try {
+      const response = await sendMessage<any>({ type: "GET_ANALYTICS", payload: {} });
+      console.log("useExtension: getAnalytics response:", response);
+      if (response.success && response.data) {
+        return response.data;
+      }
+      console.warn("useExtension: getAnalytics returned no data or failed:", response);
+      return null;
+    } catch (error) {
+      console.error("useExtension: getAnalytics error:", error);
+      return null;
+    }
   }, [sendMessage]);
 
   const getAllPages = useCallback(async () => {
@@ -221,27 +253,34 @@ export function useExtension() {
   }, [sendMessage]);
 
   const searchMemory = useCallback(async (query: string) => {
-    const response = await sendMessage<any>({ 
-      type: "SEARCH_MEMORY", 
-      payload: { query, limit: 20 } 
-    });
-    
-    if (response.success && response.data) {
-      const data = response.data;
-      // Handle RecallResult from extension
-      if (data.matches && Array.isArray(data.matches)) {
-        return data.matches.map((match: any) => ({
-          ...match.node,
-          similarity: match.similarity
-        }));
-      }
+    try {
+      const response = await sendMessage<any>({ 
+        type: "SEARCH_MEMORY", 
+        payload: { query, limit: 20 } 
+      });
       
-      // Fallback if it's already an array of nodes
-      if (Array.isArray(data)) {
-        return data;
+      if (response.success && response.data) {
+        const data = response.data;
+        // Handle RecallResult from extension
+        if (data.matches && Array.isArray(data.matches)) {
+          return data.matches.map((match: any) => ({
+            ...match.node,
+            similarity: match.similarity,
+            reason: match.reason // Preserve reason data for explain-why
+          }));
+        }
+        
+        // Fallback if it's already an array of nodes
+        if (Array.isArray(data)) {
+          return data;
+        }
       }
+      console.warn("useExtension: searchMemory returned no data or failed:", response);
+      return [];
+    } catch (error) {
+      console.error("useExtension: searchMemory error:", error);
+      return [];
     }
-    return [];
   }, [sendMessage]);
 
   const getCaptureSettings = useCallback(async () => {
@@ -260,10 +299,12 @@ export function useExtension() {
     isAvailable,
     isChecking,
     sendMessage,
+    executeAction,
     getStats,
     getAllPages,
     searchMemory,
     getCaptureSettings,
     updateCaptureSettings,
+    getAnalytics,
   };
 }

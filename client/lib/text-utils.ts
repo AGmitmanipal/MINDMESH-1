@@ -114,10 +114,12 @@ export function extractKeywords(
     "very",
   ]);
 
-  // Tokenize and filter
+  // Tokenize and filter - handle null from match() when no matches found
+  const textMatches = text.toLowerCase().match(/\b\w+\b/g) || [];
+  const titleMatches = title.toLowerCase().match(/\b\w+\b/g) || [];
   const words = [
-    ...(text.toLowerCase().match(/\b\w+\b/g) || []),
-    ...(title.toLowerCase().match(/\b\w+\b/g) || []),
+    ...textMatches,
+    ...titleMatches,
   ].filter(
     (word) =>
       word.length > 3 &&

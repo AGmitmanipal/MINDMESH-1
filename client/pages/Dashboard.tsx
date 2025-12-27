@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Search,
   Sidebar,
   Settings,
+  Bot,
   HelpCircle,
   Loader,
   X,
@@ -13,11 +14,16 @@ import {
   TrendingUp,
   Clock,
   Trash2,
-  Globe
+  Globe,
+  Info,
+  BarChart3,
+  LogOut
 } from "lucide-react";
 import Header from "@/components/Header";
 import { useExtension } from "@/hooks/useExtension";
-import type { MemoryNode } from "@shared/extension-types";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { useAuth } from "@/context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface PageMemory {
   id: string;
@@ -29,6 +35,11 @@ interface PageMemory {
   keywords: string[];
   domain: string;
   category?: string;
+  reason?: {
+    sharedKeywords: string[];
+    contextMatch: string;
+    semanticSimilarity: number;
+  };
 }
 
 interface Cluster {
@@ -125,18 +136,115 @@ const CATEGORY_DEFINITIONS = {
     description: "Official portals providing public services and regulatory information",
     domains: [".gov", "irs.gov", "usa.gov", "nic.in", "india.gov", "mygov"],
     color: "from-blue-600 to-blue-700"
+  },
+  coding: {
+    name: "Coding Practice & Challenges",
+    description: "Programming practice platforms and coding challenges",
+    domains: ["leetcode", "hackerrank", "codeforces", "codewars", "atcoder", "topcoder", "spoj", "projecteuler", "codechef"],
+    color: "from-amber-500 to-amber-600"
+  },
+  ai: {
+    name: "AI Tools & Assistants",
+    description: "AI chatbots, assistants, and AI-powered platforms",
+    domains: ["gemini", "claude", "chatgpt", "openai", "anthropic", "perplexity", "poe", "bard"],
+    color: "from-fuchsia-500 to-fuchsia-600"
+  },
+  developer: {
+    name: "Developer Tools",
+    description: "Code editors, version control, and development platforms",
+    domains: ["github", "gitlab", "bitbucket", "cursor", "vscode", "stackoverflow", "dev.to", "github.io", "git", "code"],
+    color: "from-sky-500 to-sky-600"
+  },
+  documentation: {
+    name: "Technical Documentation",
+    description: "Developer documentation, API references, technical guides, and reference materials",
+    domains: ["docs.", "developer.", "developers.", "learn.", "api.", "guide.", "reference.", "wiki.", "documentation.", "docs.nvidia", "developer.nvidia", "learn.microsoft", "docs.microsoft", "developer.microsoft", "docs.google", "developers.google", "docs.aws", "docs.github", "docs.gitlab", "docs.docker", "kubernetes.io/docs", "react.dev", "vuejs.org", "angular.io/docs", "nodejs.org/docs", "python.org/doc", "docs.python", "dev.mozilla.org", "developer.mozilla.org", "readthedocs.io", "gitbook.io", "devdocs.io"],
+    color: "from-lime-500 to-lime-600"
+  },
+  research: {
+    name: "Research & Academic",
+    description: "Academic papers, research databases, scholarly articles, and scientific resources",
+    domains: ["arxiv", "pubmed", "scholar.google", "researchgate", "academia.edu", "jstor", "ieee", "acm.org", "springer", "nature.com", "science.org", "cell.com", "plos.org", "biorxiv", "medrxiv"],
+    color: "from-rose-500 to-rose-600"
   }
 };
 
+// Generate context match reason for explain-why
+function generateContextMatchReason(query: string, node: any): string {
+  if (!query) return "Saved page";
+  
+  const queryLower = query.toLowerCase();
+  const titleLower = (node.title || "").toLowerCase();
+  const domainLower = (node.metadata?.domain || "").toLowerCase();
+  const textLower = (node.readableText || node.snippet || "").toLowerCase().slice(0, 500);
+  
+  if (titleLower === queryLower) {
+    return "Exact title match";
+  }
+  if (titleLower.includes(queryLower)) {
+    return "Title contains query terms";
+  }
+  if (domainLower.includes(queryLower)) {
+    return "Domain contains query terms";
+  }
+  if (textLower.includes(queryLower)) {
+    return "Content contains query terms";
+  }
+  if (node.keywords?.some((kw: string) => queryLower.includes(kw.toLowerCase()))) {
+    return "Shared keywords match";
+  }
+  return "Semantic similarity match";
+}
+
 // Categorize a domain
+// Priority order matters - more specific categories should be checked first
 function categorizeUrl(url: string): string {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     
+    // Check categories in priority order (more specific first)
+    // This ensures coding sites don't get misclassified as entertainment
+    const priorityOrder = [
+      "coding",      // Check coding first (leetcode, hackerrank, etc.)
+      "developer",   // Then developer tools
+      "ai",          // Then AI tools
+      "documentation", // Then docs
+      "research",    // Then research
+      "jobs",        // Then job sites
+      "education",   // Then education
+      "shopping",    // Then shopping
+      "travel",      // Then travel
+      "health",      // Then health
+      "food",        // Then food
+      "entertainment", // Then entertainment (less specific)
+      "social",      // Then social
+      "news",        // Then news
+      "nonprofit",   // Then nonprofit
+      "corporate",   // Then corporate
+      "professional", // Then professional
+      "portfolio",   // Then portfolio
+      "government",  // Then government
+    ];
+    
+    // Check priority categories first
+    for (const categoryKey of priorityOrder) {
+      const category = CATEGORY_DEFINITIONS[categoryKey as keyof typeof CATEGORY_DEFINITIONS];
+      if (category) {
+        for (const domain of category.domains) {
+          if (hostname.includes(domain.toLowerCase())) {
+            return categoryKey;
+          }
+        }
+      }
+    }
+    
+    // Check remaining categories (if any new ones added)
     for (const [key, category] of Object.entries(CATEGORY_DEFINITIONS)) {
-      for (const domain of category.domains) {
-        if (hostname.includes(domain.toLowerCase())) {
-          return key;
+      if (!priorityOrder.includes(key)) {
+        for (const domain of category.domains) {
+          if (hostname.includes(domain.toLowerCase())) {
+            return key;
+          }
         }
       }
     }
@@ -149,16 +257,30 @@ function categorizeUrl(url: string): string {
 
 export default function Dashboard() {
   console.log("Dashboard rendering, Globe is:", Globe);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("search");
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
   const [selectedMemory, setSelectedMemory] = useState<PageMemory | null>(null);
   const [memories, setMemories] = useState<PageMemory[]>([]);
   const [pageCount, setPageCount] = useState(0);
   const [storageSize, setStorageSize] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [captureEnabled, setCaptureEnabled] = useState(true);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  // Automation agent UI state
+  const [agentGoal, setAgentGoal] = useState("");
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [agentStepLimit, setAgentStepLimit] = useState(12);
+  const [agentAllowlist, setAgentAllowlist] = useState("");
+  const [agentConfirmEachStep, setAgentConfirmEachStep] = useState(true);
+  const [agentLogs, setAgentLogs] = useState<Array<{ ts: number; message: string }>>([]);
+  const agentStopRef = useRef(false);
 
   const {
     isAvailable,
@@ -168,8 +290,122 @@ export default function Dashboard() {
     searchMemory,
     getCaptureSettings,
     updateCaptureSettings,
+    getAnalytics,
     sendMessage,
+    executeAction,
   } = useExtension();
+
+  const pushAgentLog = useCallback((message: string) => {
+    setAgentLogs((prev) => [{ ts: Date.now(), message }, ...prev].slice(0, 200));
+  }, []);
+
+  const parseAllowlistDomains = useCallback(() => {
+    return agentAllowlist
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean);
+  }, [agentAllowlist]);
+
+  const stopAgent = useCallback(() => {
+    agentStopRef.current = true;
+    setAgentRunning(false);
+    pushAgentLog("Stopped.");
+  }, [pushAgentLog]);
+
+  const startAgent = useCallback(async () => {
+    if (!agentGoal.trim()) {
+      pushAgentLog("Please enter a task/goal first.");
+      return;
+    }
+    if (!isAvailable) {
+      pushAgentLog("Extension not connected.");
+      return;
+    }
+
+    agentStopRef.current = false;
+    setAgentRunning(true);
+    pushAgentLog(`Started: ${agentGoal.trim()}`);
+
+    const allowlistDomains = parseAllowlistDomains();
+    const history: Array<{ action?: any; result?: any }> = [];
+
+    for (let step = 0; step < Math.max(1, agentStepLimit); step++) {
+      if (agentStopRef.current) break;
+
+      // 1) Snapshot current page (compact)
+      const snapResp = await executeAction<any>({ type: "extract", data: { mode: "page_snapshot", maxChars: 8000, maxLinks: 50 } });
+      const snap = (snapResp as any)?.data?.data || (snapResp as any)?.data || null;
+      if (!snapResp.success || !snap) {
+        pushAgentLog("Failed to extract page snapshot.");
+        break;
+      }
+
+      // 2) Ask server (Gemini) for next step
+      const planResp = await fetch("/api/agent/step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: agentGoal.trim(),
+          step,
+          allowlistDomains,
+          snapshot: snap,
+          history,
+        }),
+      });
+
+      const planText = await planResp.text().catch(() => "");
+      const planJson = (() => {
+        try {
+          return planText ? JSON.parse(planText) : null;
+        } catch {
+          return null;
+        }
+      })();
+
+      if (!planResp.ok || !planJson?.ok) {
+        const reason = planJson?.reason || planJson?.error || planText || `HTTP ${planResp.status}`;
+        pushAgentLog(`Planning failed: ${String(reason).slice(0, 500)}`);
+        break;
+      }
+
+      if (planJson.done || planJson.action?.type === "finish") {
+        pushAgentLog(planJson.reason || "Done.");
+        break;
+      }
+
+      const action = planJson.action;
+      if (!action?.type) {
+        pushAgentLog("No action returned.");
+        break;
+      }
+
+      pushAgentLog(`Plan: ${action.type}`);
+
+      if (agentConfirmEachStep) {
+        const ok = window.confirm(`Run action: ${action.type}?\n\n${JSON.stringify(action.data || {}, null, 2)}`);
+        if (!ok) {
+          pushAgentLog("User cancelled.");
+          break;
+        }
+      }
+
+      // 3) Execute action in extension
+      const execResp = await executeAction<any>({ type: action.type, data: action.data || {} });
+      history.push({ action, result: execResp });
+
+      if (!execResp.success) {
+        pushAgentLog(`Execution failed: ${execResp.error || "unknown error"}`);
+        break;
+      }
+
+      // Give the page a moment to update after navigation/click
+      await new Promise((r) => setTimeout(r, 900));
+    }
+
+    setAgentRunning(false);
+    agentStopRef.current = false;
+    pushAgentLog("Run ended.");
+  }, [agentGoal, agentStepLimit, agentConfirmEachStep, executeAction, isAvailable, parseAllowlistDomains, pushAgentLog]);
 
   // Debounce search query
   useEffect(() => {
@@ -184,14 +420,59 @@ export default function Dashboard() {
     if (!isAvailable) return;
     
     try {
+      // Always prepare a pages fallback so Smart Search can show data even if semantic search returns empty on reload.
+      const pagesPromise = getAllPages().catch((err) => {
+        console.error("Pages fail:", err);
+        return [];
+      });
+
+      const nodesPromise = debouncedQuery.trim()
+        ? searchMemory(debouncedQuery)
+            .catch((err) => {
+              console.error("Search fail:", err);
+              return [];
+            })
+            .then(async (results) => {
+              if (Array.isArray(results) && results.length > 0) return results;
+              // Fallback: if semantic search returns nothing (e.g., index not ready yet), show all pages.
+              return await pagesPromise;
+            })
+        : pagesPromise;
+
       // Parallelize all initial requests for maximum speed
       const [stats, settings, nodes] = await Promise.all([
-        getStats().catch(err => { console.error("Stats fail:", err); return null; }),
-        getCaptureSettings().catch(err => { console.error("Settings fail:", err); return null; }),
-        debouncedQuery.trim() 
-          ? searchMemory(debouncedQuery).catch(err => { console.error("Search fail:", err); return []; })
-          : getAllPages().catch(err => { console.error("Pages fail:", err); return []; })
+        getStats().catch((err) => {
+          console.error("Stats fail:", err);
+          return null;
+        }),
+        getCaptureSettings().catch((err) => {
+          console.error("Settings fail:", err);
+          return null;
+        }),
+        nodesPromise,
       ]);
+
+      // If still empty, force-seed demo memories and refetch once.
+      let finalNodes = nodes;
+      if (!finalNodes || (Array.isArray(finalNodes) && finalNodes.length === 0)) {
+        try {
+          console.log("Dashboard: No memories found, triggering seed...");
+          const seedResp = await sendMessage<any>({ type: "SEED_MEMORIES", payload: { force: true } } as any);
+          console.log("Dashboard: Seed response:", seedResp);
+          if (seedResp?.success) {
+            console.log("Dashboard: Seed successful, fetching pages...");
+            finalNodes = await getAllPages().catch((err) => {
+              console.error("Dashboard: Failed to fetch pages after seed:", err);
+              return [];
+            });
+            console.log("Dashboard: Fetched", finalNodes?.length || 0, "pages after seed");
+          } else {
+            console.warn("Dashboard: Seed failed:", seedResp?.error);
+          }
+        } catch (err) {
+          console.error("Dashboard: Seed error:", err);
+        }
+      }
 
       if (stats) {
         setPageCount(stats.pageCount);
@@ -202,19 +483,44 @@ export default function Dashboard() {
         setCaptureEnabled(settings.enabled);
       }
 
-      if (nodes && Array.isArray(nodes)) {
-        const formattedMemories: PageMemory[] = nodes.map((node: any) => ({
-          id: node.id,
-          url: node.url,
-          title: node.title,
-          // Use snippet if available (from GET_ALL_PAGES), fallback to readableText (from SEARCH_MEMORY)
-          snippet: node.snippet || (node.readableText ? node.readableText.slice(0, 200) : ""),
-          timestamp: new Date(node.timestamp).toLocaleString(),
-          similarity: node.similarity || 1.0,
-          keywords: node.keywords || [],
-          domain: node.metadata?.domain || "",
-          category: categorizeUrl(node.url)
-        }));
+      if (finalNodes && Array.isArray(finalNodes)) {
+        const formattedMemories: PageMemory[] = finalNodes.map((node: any) => {
+          // Generate reason data if not present (for non-search results or missing data)
+          let reason = node.reason;
+          if (!reason) {
+            if (debouncedQuery.trim() && node.similarity !== undefined) {
+              // Create reason data for search results that might be missing it
+              reason = {
+                sharedKeywords: (node.keywords || []).filter((kw: string) => 
+                  debouncedQuery.toLowerCase().includes(kw.toLowerCase())
+                ),
+                contextMatch: generateContextMatchReason(debouncedQuery, node),
+                semanticSimilarity: node.similarity || 1.0
+              };
+            } else {
+              // For non-search results, create a basic reason
+              reason = {
+                sharedKeywords: [],
+                contextMatch: "Saved page",
+                semanticSimilarity: 1.0
+              };
+            }
+          }
+          
+          return {
+            id: node.id,
+            url: node.url,
+            title: node.title,
+            // Use snippet if available (from GET_ALL_PAGES), fallback to readableText (from SEARCH_MEMORY)
+            snippet: node.snippet || (node.readableText ? node.readableText.slice(0, 200) : ""),
+            timestamp: new Date(node.timestamp).toLocaleString(),
+            similarity: node.similarity || 1.0,
+            keywords: node.keywords || [],
+            domain: node.metadata?.domain || "",
+            category: categorizeUrl(node.url),
+            reason: reason
+          };
+        });
 
         setMemories(formattedMemories);
       } else {
@@ -223,36 +529,80 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Dashboard: Critical failure loading data:", err);
     }
-  }, [getAllPages, getStats, searchMemory, getCaptureSettings, debouncedQuery, isAvailable]);
+  }, [getAllPages, getStats, searchMemory, getCaptureSettings, debouncedQuery, isAvailable, sendMessage]);
 
+  // Initial load and reload when query changes - prevent infinite loop
+  const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  
   useEffect(() => {
     if (!isAvailable) {
       setIsLoading(false);
       return;
     }
-
-    const refreshData = async () => {
+    
+    // Always load on initial mount (lastQuery is null) or when query actually changed
+    if (lastQuery === null || debouncedQuery !== lastQuery) {
       setIsLoading(true);
-      try {
-        await loadData();
-      } catch (err) {
-        console.error("Dashboard: Error refreshing data", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      setLastQuery(debouncedQuery);
+      
+      // Add a small delay on initial load to let the extension's seedAlways() complete
+      const delayMs = !initialLoadDone && debouncedQuery === "" ? 500 : 0;
+      const timer = setTimeout(() => {
+        loadData().finally(() => {
+          setIsLoading(false);
+          setInitialLoadDone(true);
+        });
+      }, delayMs);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [debouncedQuery, isAvailable, loadData, lastQuery, initialLoadDone]);
 
-    refreshData();
+  // Load analytics when analytics tab is active - prevent infinite loop
+  const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
+  
+  useEffect(() => {
+    if (activeTab === "analytics" && isAvailable && !analyticsLoading && !analyticsLoaded) {
+      setAnalyticsLoading(true);
+      getAnalytics()
+        .then((data) => {
+          if (data) {
+            setAnalytics(data);
+            setAnalyticsLoaded(true);
+          }
+          setAnalyticsLoading(false);
+        })
+        .catch((err) => {
+          console.error("Failed to load analytics:", err);
+          setAnalyticsLoading(false);
+        });
+    }
+    
+    // Reset loaded state when switching away from analytics tab
+    if (activeTab !== "analytics") {
+      setAnalyticsLoaded(false);
+    }
+  }, [activeTab, isAvailable, getAnalytics, analyticsLoading, analyticsLoaded]);
 
-    // Reduced polling interval from 3s to 5s for better performance
+
+  // Separate effect for periodic refresh (only when not searching) - reduced frequency
+  useEffect(() => {
+    if (!isAvailable || debouncedQuery.trim()) {
+      return; // Don't poll when searching or extension unavailable
+    }
+
+    // Reduced polling interval to 15s to prevent spam
     const interval = setInterval(() => {
-      loadData().catch(err => {
-        console.error("Dashboard: Error in polling", err);
-      });
-    }, 5000);
+      if (!isLoading) { // Only poll if not currently loading
+        loadData().catch(err => {
+          console.error("Dashboard: Error in polling", err);
+        });
+      }
+    }, 15000); // 15 seconds
     
     return () => clearInterval(interval);
-  }, [loadData, isAvailable]);
+  }, [loadData, isAvailable, debouncedQuery, isLoading]);
 
   // Generate clusters by category
   const clusters = useMemo<Cluster[]>(() => {
@@ -334,6 +684,25 @@ export default function Dashboard() {
       <div className="main-bg" />
       <Header />
 
+      {/* Auth strip (dashboard only) */}
+      <div className="relative z-[101] max-w-7xl mx-auto px-6 lg:px-12 pt-4">
+        <div className="flex items-center justify-end gap-3">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Signed in as <span className="font-bold text-slate-700 dark:text-slate-200">{user?.email || "Unknown"}</span>
+          </div>
+          <button
+            onClick={async () => {
+              await logout();
+              navigate("/login", { replace: true });
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm"
+          >
+            <LogOut className="w-4 h-4" />
+            Logout
+          </button>
+        </div>
+      </div>
+
       {!isAvailable && !isChecking && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xl px-4">
           <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl flex items-start gap-4 text-amber-800 dark:text-amber-200 shadow-xl">
@@ -372,15 +741,23 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-xs font-bold tracking-wider text-slate-400 mb-6 uppercase">Menu</h2>
                 <nav className="space-y-1">
-                  <button onClick={() => setActiveTab("search")} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "search" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
+                  <button onClick={() => { setActiveTab("search"); setSelectedCategoryFilter(null); }} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "search" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
                     <Search className="w-4 h-4 mr-3" />
                     Smart Search
                   </button>
-                  <button onClick={() => setActiveTab("clusters")} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "clusters" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
+                  <button onClick={() => { setActiveTab("clusters"); setSelectedCategoryFilter(null); }} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "clusters" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
                     <Sidebar className="w-4 h-4 mr-3" />
                     Auto Groups ({clusters.length})
                   </button>
-                  <button onClick={() => setActiveTab("settings")} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "settings" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
+                  <button onClick={() => { setActiveTab("analytics"); setSelectedCategoryFilter(null); }} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "analytics" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
+                    <BarChart3 className="w-4 h-4 mr-3" />
+                    Analytics
+                  </button>
+                  <button onClick={() => { setActiveTab("agent"); setSelectedCategoryFilter(null); }} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "agent" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
+                    <Bot className="w-4 h-4 mr-3" />
+                    Automation Agent
+                  </button>
+                  <button onClick={() => { setActiveTab("settings"); setSelectedCategoryFilter(null); }} className={`w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === "settings" ? "bg-primary text-primary-foreground shadow-sm" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>
                     <Settings className="w-4 h-4 mr-3" />
                     Safe & Private
                   </button>
@@ -493,9 +870,58 @@ export default function Dashboard() {
                             <Globe className="w-6 h-6" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-slate-900 dark:text-white truncate group-hover:text-primary transition-colors">
-                              {memory.title}
-                            </h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-slate-900 dark:text-white truncate group-hover:text-primary transition-colors flex-1">
+                                {memory.title}
+                              </h3>
+                              {/* Always show info button, generate reason if missing */}
+                              {(() => {
+                                const reason = memory.reason || {
+                                  sharedKeywords: [],
+                                  contextMatch: memory.similarity < 1.0 ? "Semantic match" : "Saved page",
+                                  semanticSimilarity: memory.similarity || 1.0
+                                };
+                                
+                                return (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <button
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                                        >
+                                          <Info className="w-4 h-4 text-slate-400 hover:text-primary" />
+                                        </button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left" className="max-w-xs p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
+                                        <div className="space-y-3">
+                                          <div>
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Match Score</p>
+                                            <p className="text-2xl font-black text-primary">{Math.round((memory.similarity || 1.0) * 100)}%</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Why This Result?</p>
+                                            <p className="text-sm text-slate-600 dark:text-slate-300">{reason.contextMatch || "Saved page"}</p>
+                                          </div>
+                                          {reason.sharedKeywords && reason.sharedKeywords.length > 0 && (
+                                            <div>
+                                              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Shared Keywords</p>
+                                              <div className="flex flex-wrap gap-1">
+                                                {reason.sharedKeywords.map((kw: string) => (
+                                                  <span key={kw} className="px-2 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-bold uppercase">
+                                                    {kw}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                );
+                              })()}
+                            </div>
                             <p className="text-xs text-slate-400 truncate font-medium">
                               {memory.domain}
                             </p>
@@ -525,15 +951,95 @@ export default function Dashboard() {
             ) : activeTab === "clusters" ? (
               <div className="space-y-10 animate-in fade-in duration-500">
                 <div className="space-y-3">
-                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-                    Auto <span className="text-primary">Groups.</span>
-                  </h1>
-                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
-                    Your browsing organized into {clusters.length} smart categories based on website types and content.
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                        {selectedCategoryFilter ? (
+                          <>
+                            {CATEGORY_DEFINITIONS[selectedCategoryFilter as keyof typeof CATEGORY_DEFINITIONS]?.name || selectedCategoryFilter}
+                            <span className="text-primary">.</span>
+                          </>
+                        ) : (
+                          <>
+                            Auto <span className="text-primary">Groups.</span>
+                          </>
+                        )}
+                      </h1>
+                      <p className="text-lg text-slate-500 max-w-2xl leading-relaxed mt-2">
+                        {selectedCategoryFilter 
+                          ? `Showing all pages in this category`
+                          : `Your browsing organized into ${clusters.length} smart categories based on website types and content.`
+                        }
+                      </p>
+                    </div>
+                    {selectedCategoryFilter && (
+                      <button
+                        onClick={() => setSelectedCategoryFilter(null)}
+                        className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-medium text-slate-600 dark:text-slate-400"
+                      >
+                        ← Back to Groups
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
+                {selectedCategoryFilter ? (
+                  // Show filtered pages for selected category
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-20">
+                    {memories
+                      .filter((memory) => memory.category === selectedCategoryFilter)
+                      .map((memory) => (
+                        <div
+                          key={memory.id}
+                          onClick={() => setSelectedMemory(memory)}
+                          className="group p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-primary/50 hover:shadow-xl transition-all cursor-pointer relative overflow-hidden"
+                        >
+                          <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <ExternalLink className="w-4 h-4 text-primary" />
+                          </div>
+                          <div className="flex items-start gap-4 mb-4">
+                            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${CATEGORY_DEFINITIONS[memory.category as keyof typeof CATEGORY_DEFINITIONS]?.color || "from-slate-400 to-slate-500"} flex items-center justify-center text-white shadow-sm`}>
+                              <Globe className="w-6 h-6" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-bold text-slate-900 dark:text-white truncate group-hover:text-primary transition-colors">
+                                {memory.title}
+                              </h3>
+                              <p className="text-xs text-slate-400 truncate font-medium">
+                                {memory.domain}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-sm text-slate-500 line-clamp-2 mb-6 leading-relaxed">
+                            {memory.snippet}
+                          </p>
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-50 dark:border-slate-800">
+                            <div className="flex gap-1.5">
+                              {memory.keywords.slice(0, 2).map((kw) => (
+                                <span key={kw} className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                  {kw}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              <Clock className="w-3 h-3" />
+                              {new Date(memory.timestamp).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    {memories.filter((memory) => memory.category === selectedCategoryFilter).length === 0 && (
+                      <div className="col-span-full py-20 text-center space-y-4">
+                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                          <Sidebar className="w-8 h-8" />
+                        </div>
+                        <p className="text-slate-500 font-medium">No pages found in this category.</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  // Show category clusters
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
                   {isLoading && clusters.length === 0 ? (
                     <div className="col-span-full py-20 flex flex-col items-center justify-center space-y-4">
                       <Loader className="w-10 h-10 text-primary animate-spin" />
@@ -571,13 +1077,290 @@ export default function Dashboard() {
                               <p className="text-xs text-slate-400 mt-1">+ {cluster.itemCount - 5} more pages</p>
                             )}
                           </div>
-                          <button onClick={() => { setSearchQuery(""); setActiveTab("search"); }} className="w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-primary hover:text-white transition-all text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          <button onClick={() => setSelectedCategoryFilter(cluster.id)} className="w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-primary hover:text-white transition-all text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                             View All Pages
                           </button>
                         </div>
                       </div>
                     ))
                   )}
+                  </div>
+                )}
+              </div>
+            ) : activeTab === "analytics" ? (
+              <div className="space-y-10 animate-in fade-in duration-500">
+                <div className="space-y-3">
+                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Your <span className="text-primary">Analytics.</span>
+                  </h1>
+                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    Insights into your browsing patterns, top sites, and categories over time.
+                  </p>
+                </div>
+
+                {analyticsLoading ? (
+                  <div className="py-20 flex flex-col items-center justify-center space-y-4">
+                    <Loader className="w-10 h-10 text-primary animate-spin" />
+                    <p className="text-slate-500 font-medium">Loading analytics...</p>
+                  </div>
+                ) : analytics ? (
+                  <div className="space-y-8 pb-20">
+                    {/* Overview Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total Pages</p>
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">{analytics.totalPages.toLocaleString()}</p>
+                      </div>
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Unique Sites</p>
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">{analytics.uniqueDomains.toLocaleString()}</p>
+                      </div>
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Date Range</p>
+                        <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
+                          {new Date(analytics.dateRange.start).toLocaleDateString()} - {new Date(analytics.dateRange.end).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Daily Stats */}
+                    {analytics.daily && analytics.daily.length > 0 && (
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Daily Activity</h3>
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {analytics.daily.slice(-30).map((day: any) => (
+                            <div key={day.date} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{day.date}</span>
+                              <div className="flex items-center gap-3">
+                                <div className="w-32 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-primary rounded-full transition-all"
+                                    style={{ width: `${Math.min(100, (day.count / Math.max(...analytics.daily.map((d: any) => d.count))) * 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-sm font-bold text-slate-900 dark:text-white w-12 text-right">{day.count}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Monthly Stats */}
+                    {analytics.monthly && analytics.monthly.length > 0 && (
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Monthly Activity</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {analytics.monthly.map((month: any) => (
+                            <div key={month.month} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{month.month}</p>
+                              <p className="text-2xl font-black text-slate-900 dark:text-white">{month.count.toLocaleString()}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Top Sites */}
+                    {analytics.topSites && analytics.topSites.length > 0 && (
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Top Sites</h3>
+                        <div className="space-y-3">
+                          {analytics.topSites.slice(0, 10).map((site: any, index: number) => (
+                            <div key={site.domain} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                              <div className="flex items-center gap-4 flex-1 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-black text-sm shrink-0">
+                                  {index + 1}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-bold text-slate-900 dark:text-white truncate">{site.domain}</p>
+                                  <p className="text-xs text-slate-400">Last visit: {new Date(site.lastVisit).toLocaleDateString()}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-slate-900 dark:text-white">{site.count.toLocaleString()}</p>
+                                  <p className="text-xs text-slate-400">{site.percentage.toFixed(1)}%</p>
+                                </div>
+                                <div className="w-24 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-primary rounded-full"
+                                    style={{ width: `${site.percentage}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Top Categories */}
+                    {analytics.topCategories && analytics.topCategories.length > 0 && (
+                      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Top Categories</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {analytics.topCategories.map((cat: any) => {
+                            const categoryKey = cat.category;
+                            const categoryDef = CATEGORY_DEFINITIONS[categoryKey as keyof typeof CATEGORY_DEFINITIONS];
+                            const categoryName = categoryDef?.name || (categoryKey === "miscellaneous" ? "Miscellaneous" : categoryKey);
+                            const categoryColor = categoryDef?.color || "from-slate-400 to-slate-500";
+                            
+                            return (
+                              <div key={cat.category} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${categoryColor} flex items-center justify-center text-white text-xs font-black`}>
+                                      {categoryName.charAt(0)}
+                                    </div>
+                                    <p className="font-bold text-slate-900 dark:text-white">{categoryName}</p>
+                                  </div>
+                                  <p className="text-sm font-bold text-primary">{cat.percentage.toFixed(1)}%</p>
+                                </div>
+                                <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full bg-gradient-to-r ${categoryColor} rounded-full transition-all`}
+                                    style={{ width: `${cat.percentage}%` }}
+                                  />
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">{cat.count.toLocaleString()} pages</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-20 text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                      <BarChart3 className="w-8 h-8" />
+                    </div>
+                    <p className="text-slate-500 font-medium">No analytics data available yet. Start browsing to see your insights!</p>
+                  </div>
+                )}
+              </div>
+            ) : activeTab === "agent" ? (
+              <div className="space-y-10 animate-in fade-in duration-500 pb-20">
+                <div className="space-y-3">
+                  <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Automation <span className="text-primary">Agent.</span>
+                  </h1>
+                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    Uses Gemini (server-side) to plan steps, then executes them via the extension.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-bold text-slate-900 dark:text-white">Task</h3>
+                      <p className="text-sm text-slate-500">Describe what you want to accomplish in the current tab.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Goal</label>
+                      <input
+                        type="text"
+                        placeholder='e.g. "Search for wireless headphones under $100 and open 3 options"'
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium shadow-sm focus:outline-none focus:border-primary transition-all placeholder:text-slate-400"
+                        value={agentGoal}
+                        onChange={(e) => setAgentGoal(e.target.value)}
+                        disabled={agentRunning}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Max steps</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium shadow-sm focus:outline-none focus:border-primary transition-all"
+                          value={agentStepLimit}
+                          onChange={(e) => setAgentStepLimit(Math.max(1, Math.min(50, Number(e.target.value || 12))))}
+                          disabled={agentRunning}
+                        />
+                      </div>
+
+                      <label className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                        <div>
+                          <div className="text-sm font-bold text-slate-900 dark:text-white">Confirm each step</div>
+                          <div className="text-xs text-slate-500">Recommended for safety.</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={agentConfirmEachStep}
+                          onChange={(e) => setAgentConfirmEachStep(e.target.checked)}
+                          disabled={agentRunning}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Allowlist domains (comma separated)</label>
+                      <input
+                        type="text"
+                        placeholder="amazon.com, bestbuy.com"
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium shadow-sm focus:outline-none focus:border-primary transition-all placeholder:text-slate-400"
+                        value={agentAllowlist}
+                        onChange={(e) => setAgentAllowlist(e.target.value)}
+                        disabled={agentRunning}
+                      />
+                      <div className="text-xs text-slate-500">Leave empty to allow any domain (except restricted schemes).</div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={startAgent}
+                        disabled={agentRunning || !isAvailable}
+                        className="px-5 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-lg hover:opacity-90 transition-all disabled:opacity-60"
+                      >
+                        Start
+                      </button>
+                      <button
+                        onClick={stopAgent}
+                        disabled={!agentRunning}
+                        className="px-5 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold text-slate-600 dark:text-slate-400 disabled:opacity-60"
+                      >
+                        Stop
+                      </button>
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Status: <span className="text-slate-700 dark:text-slate-200">{agentRunning ? "running" : "idle"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Logs</h3>
+                        <p className="text-sm text-slate-500">Newest first.</p>
+                      </div>
+                      <button
+                        onClick={() => setAgentLogs([])}
+                        className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xs font-bold text-slate-600 dark:text-slate-400"
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    <div className="max-h-[520px] overflow-y-auto space-y-2">
+                      {agentLogs.length === 0 ? (
+                        <div className="py-10 text-center text-slate-500">No logs yet.</div>
+                      ) : (
+                        agentLogs.map((l, idx) => (
+                          <div key={idx} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              {new Date(l.ts).toLocaleTimeString()}
+                            </div>
+                            <div className="text-sm font-medium text-slate-700 dark:text-slate-200 mt-1">{l.message}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (

@@ -3,7 +3,14 @@
  * Production-ready storage with proper schema, migrations, and optimizations
  */
 
-import type { MemoryNode, Embedding, MemoryCluster, SemanticMatch, PrivacyRule, CaptureSettings } from "@shared/extension-types";
+import type {
+  MemoryNode,
+  Embedding,
+  MemoryCluster,
+  SemanticMatch,
+  PrivacyRule,
+  CaptureSettings,
+} from "@shared/extension-types";
 import { cosineSimilarity, ANNIndex } from "./vector-search";
 
 const DB_NAME = "cortex-memory";
@@ -180,12 +187,9 @@ export class CortexStorage {
       const store = transaction.objectStore(STORES.PAGES);
       const index = store.index("timestamp");
       
-      // Use openCursor for better performance with limits
-      const request = limit 
-        ? index.openCursor(null, "prev") // Descending order
-        : index.getAll();
-      
       if (limit) {
+        // Use cursor for limited results
+        const request = index.openCursor(null, "prev"); // Descending order
         const results: MemoryNode[] = [];
         let count = 0;
         
@@ -202,17 +206,14 @@ export class CortexStorage {
         
         request.onerror = () => reject(new Error("Failed to get memory nodes"));
       } else {
-        // Even without limit, use cursor to avoid massive memory spike with getAll()
-        const results: MemoryNode[] = [];
-        request.onsuccess = (event) => {
-          const cursor = (event.target as IDBRequest).result;
-          if (cursor) {
-            results.push(cursor.value);
-            cursor.continue();
-          } else {
-            resolve(results);
-          }
+        // Without limit, use getAll() which returns an array directly
+        const request = index.getAll();
+        
+        request.onsuccess = () => {
+          const results = (request.result as MemoryNode[]) || [];
+          resolve(results);
         };
+        
         request.onerror = () => reject(new Error("Failed to get memory nodes"));
       }
     });

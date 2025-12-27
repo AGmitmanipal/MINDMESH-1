@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
-import { Menu, X, Shield, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Menu, X, Shield, ShieldAlert, CheckCircle2, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { useExtension } from "@/hooks/useExtension";
+import { useTheme } from "@/hooks/useTheme";
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isAvailable, isChecking } = useExtension();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <header className="sticky top-0 z-[100] w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
@@ -59,6 +61,17 @@ export default function Header() {
               Privacy
             </Link>
             <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-2" />
+            <button
+              onClick={toggleTheme}
+              className="p-2.5 rounded-xl backdrop-blur-md bg-white/70 dark:bg-slate-800/70 border border-slate-200/50 dark:border-slate-700/50 hover:bg-white/90 dark:hover:bg-slate-800/90 hover:border-primary/30 dark:hover:border-primary/40 transition-all duration-200 shadow-sm hover:shadow-md"
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? (
+                <Sun className="w-5 h-5 text-amber-500 dark:text-amber-400" />
+              ) : (
+                <Moon className="w-5 h-5 text-slate-700 dark:text-slate-300" />
+              )}
+            </button>
             <Link 
               to="/dashboard"
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-all shadow-sm"
@@ -104,6 +117,25 @@ export default function Header() {
             >
               Privacy
             </Link>
+            <button
+              onClick={() => {
+                toggleTheme();
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition-colors"
+            >
+              {theme === "dark" ? (
+                <>
+                  <Sun className="w-4 h-4" />
+                  Light Mode
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4" />
+                  Dark Mode
+                </>
+              )}
+            </button>
           </nav>
         )}
       </div>

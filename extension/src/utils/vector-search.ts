@@ -239,9 +239,18 @@ function generateContextMatch(queryText: string, node: MemoryNode): string {
   const queryLower = queryText.toLowerCase();
   const titleLower = node.title.toLowerCase();
   const textLower = node.readableText.toLowerCase().slice(0, 500);
+  const domainLower = node.metadata.domain.toLowerCase();
+
+  if (titleLower === queryLower) {
+    return "Exact title match";
+  }
 
   if (titleLower.includes(queryLower)) {
     return "Title contains query terms";
+  }
+
+  if (domainLower.includes(queryLower)) {
+    return "Domain contains query terms";
   }
 
   if (textLower.includes(queryLower)) {
@@ -253,5 +262,50 @@ function generateContextMatch(queryText: string, node: MemoryNode): string {
   }
 
   return "Semantic similarity match";
+}
+
+/**
+ * Calculate hybrid search score with title/domain boosting
+ * Boosts semantic similarity based on exact matches in title and domain
+ */
+export function calculateHybridScore(
+  semanticSimilarity: number,
+  node: MemoryNode,
+  query: string
+): number {
+  const queryLower = query.toLowerCase();
+  const titleLower = node.title.toLowerCase();
+  const domainLower = node.metadata.domain.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+  
+  let score = semanticSimilarity;
+  
+  // Exact title match = huge boost (40%)
+  if (titleLower === queryLower) {
+    score = Math.min(1.0, score + 0.4);
+  }
+  // Title contains exact query = large boost (25%)
+  else if (titleLower.includes(queryLower)) {
+    score = Math.min(1.0, score + 0.25);
+  }
+  // All query words in title = medium boost (20%)
+  else if (queryWords.every(word => titleLower.includes(word))) {
+    score = Math.min(1.0, score + 0.2);
+  }
+  // Some query words in title = small boost (10%)
+  else if (queryWords.some(word => titleLower.includes(word))) {
+    score = Math.min(1.0, score + 0.1);
+  }
+  
+  // Domain contains query = medium boost (15%)
+  if (domainLower.includes(queryLower)) {
+    score = Math.min(1.0, score + 0.15);
+  }
+  // Domain contains query words = small boost (8%)
+  else if (queryWords.some(word => domainLower.includes(word))) {
+    score = Math.min(1.0, score + 0.08);
+  }
+  
+  return score;
 }
 

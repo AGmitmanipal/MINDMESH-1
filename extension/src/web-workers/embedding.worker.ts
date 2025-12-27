@@ -2,9 +2,15 @@
  * Embedding Web Worker
  * Generates semantic embeddings for pages
  * 
- * Production: Use WASM model (onnxruntime-web or ggml-wasm)
+ * Production: Use WASM model (transformers.js with all-MiniLM-L6-v2)
  * Fallback: High-quality deterministic embedding based on text features
  */
+
+import { pipeline, env } from '@xenova/transformers';
+
+// Disable local model files, use CDN
+env.allowLocalModels = false;
+env.useBrowserCache = true;
 
 interface EmbeddingRequest {
   id: string;
@@ -91,18 +97,77 @@ function generateFallbackEmbedding(
   return vector;
 }
 
-// Check if WASM model is available (placeholder for future implementation)
+// WASM model instance (lazy loaded)
+let wasmModel: any = null;
+let modelLoading: Promise<boolean> | null = null;
+
+// Check if WASM model is available and load it
 async function loadWASMModel(): Promise<boolean> {
-  // In production, load onnxruntime-web or ggml-wasm model here
-  // For now, return false to use fallback
-  return false;
+  // If already loaded, return true
+  if (wasmModel !== null) {
+    return true;
+  }
+
+  // If currently loading, wait for it
+  if (modelLoading !== null) {
+    return await modelLoading;
+  }
+
+  // Start loading
+  modelLoading = (async () => {
+    try {
+      wasmModel = await pipeline(
+        'feature-extraction',
+        'Xenova/all-MiniLM-L6-v2',
+        { quantized: true } // Use quantized model for smaller size
+      );
+      console.log('WASM embedding model loaded successfully');
+      return true;
+    } catch (error) {
+      console.warn('Failed to load WASM embedding model, using fallback:', error);
+      wasmModel = null;
+      return false;
+    }
+  })();
+
+  return await modelLoading;
 }
 
-// Generate embedding using WASM model (placeholder)
+// Generate embedding using WASM model
 async function generateWASMEmbedding(text: string): Promise<number[]> {
-  // In production, this would use the actual WASM model
-  // For now, fall back to enhanced fallback
-  return generateFallbackEmbedding(text);
+  if (!wasmModel) {
+    throw new Error('WASM model not loaded');
+  }
+
+  try {
+    // Combine text for embedding (model expects single string)
+    const combinedText = text.trim();
+    
+    // Generate embedding
+    const output = await wasmModel(combinedText, {
+      pooling: 'mean',
+      normalize: true,
+    });
+
+    // Convert tensor to a numeric array (types can be loose depending on the runtime/model wrapper)
+    const embedding = Array.from(output.data as Iterable<unknown>).map((v) => Number(v));
+    
+    // Ensure it's exactly 384 dimensions (all-MiniLM-L6-v2 output)
+    if (embedding.length !== 384) {
+      console.warn(`Unexpected embedding dimension: ${embedding.length}, expected 384`);
+      // Pad or truncate if needed (shouldn't happen, but safety check)
+      if (embedding.length < 384) {
+        embedding.push(...new Array(384 - embedding.length).fill(0));
+      } else {
+        return embedding.slice(0, 384);
+      }
+    }
+
+    return embedding;
+  } catch (error) {
+    console.error('Error generating WASM embedding:', error);
+    throw error; // Let caller handle fallback
+  }
 }
 
 self.onmessage = async (event: MessageEvent<EmbeddingRequest>) => {
@@ -115,10 +180,17 @@ self.onmessage = async (event: MessageEvent<EmbeddingRequest>) => {
     let model: "wasm" | "fallback";
 
     if (hasWASM) {
-      embedding = await generateWASMEmbedding(text);
-      model = "wasm";
+      try {
+        embedding = await generateWASMEmbedding(text);
+        model = "wasm";
+      } catch (wasmError) {
+        // If WASM generation fails, fall back to deterministic embedding
+        console.warn("WASM embedding failed, using fallback:", wasmError);
+        embedding = generateFallbackEmbedding(text, title || "", keywords || []);
+        model = "fallback";
+      }
     } else {
-      embedding = generateFallbackEmbedding(text, title, keywords);
+      embedding = generateFallbackEmbedding(text, title || "", keywords || []);
       model = "fallback";
     }
 
@@ -132,14 +204,30 @@ self.onmessage = async (event: MessageEvent<EmbeddingRequest>) => {
     self.postMessage(response);
   } catch (error) {
     console.error("Embedding worker error:", error);
-    const response: EmbeddingResponse = {
-      id: event.data.id,
-      embedding: [],
-      success: false,
-      model: "fallback",
-    };
-
-    self.postMessage(response);
+    // Last resort: use fallback even on unexpected errors
+    try {
+      const fallbackEmbedding = generateFallbackEmbedding(
+        event.data.text,
+        event.data.title || "",
+        event.data.keywords || []
+      );
+      const response: EmbeddingResponse = {
+        id: event.data.id,
+        embedding: fallbackEmbedding,
+        success: true,
+        model: "fallback",
+      };
+      self.postMessage(response);
+    } catch (fallbackError) {
+      // Absolute last resort: empty embedding
+      const response: EmbeddingResponse = {
+        id: event.data.id,
+        embedding: [],
+        success: false,
+        model: "fallback",
+      };
+      self.postMessage(response);
+    }
   }
 };
 
