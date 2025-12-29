@@ -421,13 +421,13 @@ export default function Dashboard() {
     
     try {
       // Always prepare a pages fallback so Smart Search can show data even if semantic search returns empty on reload.
-      const pagesPromise = getAllPages().catch((err) => {
+      const pagesPromise = getAllPages(user?.uid).catch((err) => {
         console.error("Pages fail:", err);
         return [];
       });
 
       const nodesPromise = debouncedQuery.trim()
-        ? searchMemory(debouncedQuery)
+        ? searchMemory(debouncedQuery, user?.uid)
             .catch((err) => {
               console.error("Search fail:", err);
               return [];
@@ -441,7 +441,7 @@ export default function Dashboard() {
 
       // Parallelize all initial requests for maximum speed
       const [stats, settings, nodes] = await Promise.all([
-        getStats().catch((err) => {
+        getStats(user?.uid).catch((err) => {
           console.error("Stats fail:", err);
           return null;
         }),
@@ -693,6 +693,14 @@ export default function Dashboard() {
           <button
             onClick={async () => {
               await logout();
+              try {
+                // Do NOT clear extension data on logout; just unset the active user so other users' data remains.
+                if (isAvailable) {
+                  await sendMessage({ type: "SET_ACTIVE_USER", payload: { userId: null } });
+                }
+              } catch (e) {
+                console.warn("Failed to unset active user in extension on logout:", e);
+              }
               navigate("/login", { replace: true });
             }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm"
@@ -814,8 +822,8 @@ export default function Dashboard() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <button onClick={loadData} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 transition-all text-slate-500 shadow-sm">
-                      <Loader className={`w-5 h-5 ${isLoading ? "animate-spin text-primary" : ""}`} />
+                    <button onClick={loadData} className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 transition-all text-blue-500 shadow-sm">
+                      Load Data
                     </button>
                     <button onClick={handleExport} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 transition-all text-sm font-bold text-slate-700 dark:text-slate-300 shadow-sm">
                       <Download className="w-4 h-4" />
@@ -846,7 +854,8 @@ export default function Dashboard() {
                   {isLoading && memories.length === 0 ? (
                     <div className="col-span-full py-20 flex flex-col items-center justify-center space-y-4">
                       <Loader className="w-10 h-10 text-primary animate-spin" />
-                      <p className="text-slate-500 font-medium">Loading memories...</p>
+                      <p className="text-slate-500 font-medium">Waiting For You...</p>
+                      <p className="text-blue-500 font-small">Click on "Load Data" to see the memories</p>
                     </div>
                   ) : filteredMemories.length === 0 ? (
                     <div className="col-span-full py-20 text-center space-y-4">
@@ -1246,7 +1255,7 @@ export default function Dashboard() {
                   <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                     Automation <span className="text-primary">Agent.</span>
                   </h1>
-                  <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
+                    <p className="text-lg text-slate-500 max-w-2xl leading-relaxed">
                     Uses Gemini (server-side) to plan steps, then executes them via the extension.
                   </p>
                 </div>

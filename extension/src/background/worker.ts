@@ -24,6 +24,8 @@ const sessionCaptured = new Map<string, number>(); // URL -> timestamp
 // Ensure storage is ready before handling messages
 let storageReady = false;
 let seedingComplete = false;
+// Active user id for scoping captures and queries when dashboard sets it
+let activeUserId: string | null = null;
 
 cortexStorage.ready().then(async () => {
   storageReady = true;
@@ -134,6 +136,32 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
 
     try {
       switch (message.type) {
+        case "SET_ACTIVE_USER": {
+          activeUserId = message.payload?.userId || null;
+          console.log("Cortex: Active user set to", activeUserId);
+          // If a userId was provided, retroactively assign pages captured in this session
+          // (non-seed pages without a userId) to this user so they appear in their dashboard.
+          if (activeUserId) {
+            try {
+              const all = await cortexStorage.getAllMemoryNodes();
+              let updated = 0;
+              for (const page of all) {
+                const meta = page.metadata || {};
+                if (meta.sessionId && meta.sessionId !== "seed" && !meta.userId) {
+                  meta.userId = activeUserId;
+                  page.metadata = meta;
+                  await cortexStorage.addMemoryNode(page);
+                  updated++;
+                }
+              }
+              console.log(`Cortex: Assigned ${updated} existing pages to user ${activeUserId}`);
+            } catch (e) {
+              console.error("Cortex: Failed to assign existing pages to active user:", e);
+            }
+          }
+          return { success: true };
+        }
+
         case "SEED_MEMORIES": {
           await seedAlways();
           const stats = await cortexStorage.getStats();
@@ -223,6 +251,8 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
                   favicon: payload.favicon,
                   tabId: sender.tab?.id,
                   sessionId: (payload as any).sessionId,
+                  // Prefer explicit userId from payload, fall back to activeUserId if set
+                  userId: (payload as any).userId || activeUserId || undefined,
                 },
               };
 
@@ -262,8 +292,19 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
           }
           
           const pages = await cortexStorage.getAllMemoryNodes(message.payload.limit);
+          // If dashboard requested a specific user (or activeUserId is set), filter pages
+          const requestedUser = message.payload?.userId || activeUserId;
+          let filtered = pages;
+          if (requestedUser) {
+            filtered = pages.filter((page) => {
+              const pageUser = page.metadata?.userId;
+              // Always include seed items
+              if (page.metadata?.sessionId === "seed") return true;
+              return pageUser === requestedUser;
+            });
+          }
           // Only send what's needed for the dashboard list to save bandwidth and speed up communication
-          const minimalPages = pages.map(page => ({
+          const minimalPages = filtered.map(page => ({
             id: page.id,
             url: page.url,
             title: page.title,
@@ -288,6 +329,29 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
             }
           }
           
+          const requestedUser = message.payload?.userId || activeUserId;
+          if (requestedUser) {
+            // Compute stats scoped to user + seeds
+            const all = await cortexStorage.getAllMemoryNodes();
+            const filtered = all.filter((page) => {
+              if (page.metadata?.sessionId === "seed") return true;
+              return page.metadata?.userId === requestedUser;
+            });
+            const pageCount = filtered.length;
+            let storageSize = 0;
+            if (navigator.storage && (navigator.storage as any).estimate) {
+              try {
+                const estimate = await (navigator.storage as any).estimate();
+                storageSize = estimate.usage || 0;
+              } catch (e) {
+                // ignore
+              }
+            }
+            const stats = { pageCount, clusterCount: 0, edgeCount: 0, storageSize };
+            console.log("Cortex: GET_STATS (scoped) returning", stats);
+            return { success: true, data: stats };
+          }
+
           const stats = await cortexStorage.getStats();
           console.log("Cortex: GET_STATS returning", stats);
           return { success: true, data: stats };
@@ -298,6 +362,16 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
             console.log("Cortex: Starting SEARCH_MEMORY for query:", message.payload.query);
             const results = await recallService.search(message.payload.query, message.payload.limit || 20);
             console.log("Cortex: SEARCH_MEMORY completed, returning", results.totalResults, "results");
+            // If scoped to a user, filter matches
+            const requestedUser = message.payload?.userId || activeUserId;
+            if (requestedUser && results && Array.isArray((results as any).matches)) {
+              const filteredMatches = (results as any).matches.filter((m: any) => {
+                const pageUser = m.node?.metadata?.userId;
+                if (m.node?.metadata?.sessionId === "seed") return true;
+                return pageUser === requestedUser;
+              });
+              return { success: true, data: { ...(results as any), matches: filteredMatches, totalResults: filteredMatches.length } };
+            }
             return { success: true, data: results };
           } catch (error) {
             console.error("Cortex: SEARCH_MEMORY error:", error);
@@ -320,8 +394,24 @@ const messageHandler = (message: ExtensionMessage, sender: chrome.runtime.Messag
         }
 
         case "FORGET_DATA": {
-          const { domain, startDate, endDate } = message.payload;
+          const { domain, startDate, endDate, userId } = message.payload || {};
           let count = 0;
+          if (userId) {
+            // Delete only data belonging to the given userId
+            try {
+              const all = await cortexStorage.getAllMemoryNodes();
+              const toDelete = all.filter((p) => p.metadata?.userId === userId).map((p) => p.id);
+              for (const id of toDelete) {
+                await cortexStorage.deleteMemoryNode(id);
+                count++;
+              }
+              return { success: true, count };
+            } catch (e) {
+              console.error("Cortex: FORGET_DATA by userId failed", e);
+              return { success: false, error: String(e) };
+            }
+          }
+
           if (domain) {
             count = await cortexStorage.deleteByDomain(domain);
           } else if (startDate && endDate) {

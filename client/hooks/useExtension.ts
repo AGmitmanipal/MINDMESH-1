@@ -219,8 +219,8 @@ export function useExtension() {
     [sendMessage]
   );
 
-  const getStats = useCallback(async () => {
-    const response = await sendMessage<any>({ type: "GET_STATS", payload: {} });
+  const getStats = useCallback(async (userId?: string) => {
+    const response = await sendMessage<any>({ type: "GET_STATS", payload: { userId } });
     console.log("useExtension: getStats response:", response);
     if (response.success && response.data) {
       return response.data;
@@ -243,20 +243,44 @@ export function useExtension() {
     }
   }, [sendMessage]);
 
-  const getAllPages = useCallback(async () => {
-    const response = await sendMessage<MemoryNode[]>({ type: "GET_ALL_PAGES", payload: { limit: 100 } });
-    console.log("useExtension: getAllPages response:", response);
-    if (response.success && response.data) {
-      return response.data;
+  const getAllPages = useCallback(async (userId?: string) => {
+    try {
+      const response = await sendMessage<MemoryNode[]>({ type: "GET_ALL_PAGES", payload: { limit: 100, userId } });
+      console.log("useExtension: getAllPages response:", response);
+      if (response.success && response.data) {
+        return response.data;
+      }
+      // If extension failed but returned a structure, fall through to fallback
+    } catch (err) {
+      console.warn("useExtension: getAllPages sendMessage failed, falling back to local seed:", err);
     }
-    return [];
+
+    // Fallback for development when extension isn't available: load local seed file
+    try {
+      const resp = await fetch("/seed-memories.json");
+      if (!resp.ok) throw new Error("Failed to fetch local seed");
+      const data = await resp.json();
+      // Convert to minimal nodes expected by dashboard (id,url,title,timestamp,keywords,metadata,snippet)
+      return (data || []).map((d: any) => ({
+        id: d.id,
+        url: d.url,
+        title: d.title,
+        timestamp: d.timestamp,
+        keywords: d.keywords || [],
+        metadata: d.metadata || {},
+        snippet: d.readableText ? String(d.readableText).slice(0, 300) : "",
+      }));
+    } catch (e) {
+      console.error("useExtension: local seed fallback failed:", e);
+      return [];
+    }
   }, [sendMessage]);
 
-  const searchMemory = useCallback(async (query: string) => {
+  const searchMemory = useCallback(async (query: string, userId?: string) => {
     try {
       const response = await sendMessage<any>({ 
         type: "SEARCH_MEMORY", 
-        payload: { query, limit: 20 } 
+        payload: { query, limit: 20, userId } 
       });
       
       if (response.success && response.data) {

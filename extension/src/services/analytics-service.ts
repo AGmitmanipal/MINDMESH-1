@@ -225,7 +225,7 @@ export class AnalyticsService {
           domains: ["github", "gitlab", "bitbucket", "cursor", "vscode", "stackoverflow", "dev.to", "github.io", "git", "code"]
         },
         ai: {
-          domains: ["gemini", "claude", "chatgpt", "openai", "anthropic", "perplexity", "poe", "bard"]
+              domains: ["gemini", "claude", "chatgpt", "openai", "anthropic", "perplexity", "poe", "bard"]
         },
         documentation: {
           domains: ["docs.", "developer.", "developers.", "learn.", "api.", "guide.", "reference.", "wiki.", "documentation.", "docs.nvidia", "developer.nvidia", "learn.microsoft", "docs.microsoft", "developer.microsoft", "docs.google", "developers.google", "docs.aws", "docs.github", "docs.gitlab", "docs.docker", "kubernetes.io/docs", "react.dev", "vuejs.org", "angular.io/docs", "nodejs.org/docs", "python.org/doc", "docs.python", "dev.mozilla.org", "developer.mozilla.org", "readthedocs.io", "gitbook.io", "devdocs.io"]

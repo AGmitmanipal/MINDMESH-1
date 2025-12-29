@@ -14,7 +14,7 @@ import type {
 import { cosineSimilarity, ANNIndex } from "./vector-search";
 
 const DB_NAME = "cortex-memory";
-const DB_VERSION = 2; // Increment for schema changes
+const DB_VERSION = 3; // Increment for schema changes (added userId index)
 
 const STORES = {
   PAGES: "pages",
@@ -56,6 +56,7 @@ export class CortexStorage {
           pageStore.createIndex("domain", "metadata.domain", { unique: false });
           pageStore.createIndex("timestamp", "timestamp", { unique: false });
           pageStore.createIndex("sessionId", "metadata.sessionId", { unique: false });
+          pageStore.createIndex("userId", "metadata.userId", { unique: false });
         }
 
         // Embeddings store - vector embeddings for semantic search

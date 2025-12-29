@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
+import { useExtension } from "@/hooks/useExtension";
+import { auth } from "@/firebase";
 
 export default function Signup() {
   const { signUp } = useAuth();
+  const { sendMessage } = useExtension();
   const nav = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -36,6 +39,14 @@ export default function Signup() {
               setBusy(true);
               try {
                 await signUp(email.trim(), password);
+                try {
+                  const uid = auth.currentUser?.uid || null;
+                  await sendMessage({ type: "SET_ACTIVE_USER", payload: { userId: uid } });
+                  // Seed demo memories for new users if desired, but do NOT clear existing data.
+                  await sendMessage({ type: "SEED_MEMORIES", payload: { force: true } });
+                } catch (e) {
+                  console.warn("Failed to notify extension to set/seed data:", e);
+                }
                 nav("/dashboard", { replace: true });
               } catch (err: any) {
                 setError(err?.message || "Sign up failed");

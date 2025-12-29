@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
+import { useExtension } from "@/hooks/useExtension";
+import { auth } from "@/firebase";
 
 export default function Login() {
   const { login } = useAuth();
+  const { sendMessage } = useExtension();
   const nav = useNavigate();
   const location = useLocation() as any;
   const from = location?.state?.from || "/dashboard";
@@ -38,6 +41,14 @@ export default function Login() {
               setBusy(true);
               try {
                 await login(email.trim(), password);
+                try {
+                  const uid = auth.currentUser?.uid || null;
+                  await sendMessage({ type: "SET_ACTIVE_USER", payload: { userId: uid } });
+                  // Do not clear existing extension data on login; keep user's captured memories.
+                  await sendMessage({ type: "SEED_MEMORIES", payload: { force: true } });
+                } catch (e) {
+                  console.warn("Failed to notify extension to set/seed data:", e);
+                }
                 nav(from, { replace: true });
               } catch (err: any) {
                 setError(err?.message || "Login failed");

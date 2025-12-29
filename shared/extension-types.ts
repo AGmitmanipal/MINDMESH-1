@@ -137,7 +137,12 @@ export type ExtensionMessage =
         domain?: string;
         startDate?: number;
         endDate?: number;
+        userId?: string | null;
       };
+    }
+  | {
+      type: "SET_ACTIVE_USER";
+      payload: { userId: string | null };
     }
   | {
       type: "EXPORT_MEMORY";
